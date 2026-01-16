@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from dataclasses import asdict
+from json.decoder import JSONObject
 from pathlib import Path
 from typing import Any, Optional
 
@@ -242,11 +243,8 @@ def main() -> None:
         max_candidates=args.max_candidates,
     )
 
-    out_path = Path(args.out).resolve() if args.out else (artifacts_dir / "report.json").resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-
-    print(f"[Inspector] Report written: {out_path}")
+    with open("output.json", 'w') as f:
+        json.dump(report, f, indent=4)
     print(f"[Inspector] Artifacts dir: {artifacts_dir}")
 
 
