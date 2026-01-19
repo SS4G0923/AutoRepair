@@ -34,15 +34,11 @@ def _resolve_defects4j_executable() -> str:
       - If $D4J_HOME is set: $D4J_HOME/framework/bin/defects4j
       - Else: rely on PATH
     """
-    d4j_home = os.environ.get("D4J_HOME")
-    if d4j_home:
-        candidate = Path(d4j_home) / "framework" / "bin" / "defects4j"
-        if candidate.exists():
-            return str(candidate)
-
     which = shutil.which("defects4j")
     if which:
         return which
+    else:
+        return "perl "+str(Path("..\\..\\defects4j\\framework\\bin\\defects4j").resolve())
 
     raise Defects4JError(
         "Cannot find defects4j executable. Set D4J_HOME or add defects4j to PATH."

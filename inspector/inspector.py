@@ -1,11 +1,8 @@
 # inspector/inspector.py
 from __future__ import annotations
 
-import argparse
 import json
-import os
 from dataclasses import asdict
-from json.decoder import JSONObject
 from pathlib import Path
 from typing import Any, Optional
 
@@ -211,25 +208,18 @@ def run_defects4j_inspection(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Inspector Agent (Defects4J) - diagnosis + localization report")
-    ap.add_argument("--project", required=True, help="Defects4J project id, e.g., Lang, Chart, Math")
-    ap.add_argument("--bug", required=True, type=int, help="Bug id, e.g., 1")
-    ap.add_argument("--version", choices=["b", "f"], default="b", help="b=buggy, f=fixed")
-    ap.add_argument("--workdir", required=True, help="Workspace directory for checked-out bug version")
-    ap.add_argument("--artifacts", default=None, help="Directory to store logs/report (default: <workdir>/.inspector)")
-    ap.add_argument("--force-checkout", action="store_true", help="Force re-checkout into workdir")
-    ap.add_argument("--test-mode", choices=["relevant", "all"], default="relevant")
-    ap.add_argument("--inspect-failing-tests", type=int, default=1, help="How many failing tests to inspect via -t")
-    ap.add_argument("--max-candidates", type=int, default=8, help="Max candidate stack frames to keep")
-    ap.add_argument("--out", default=None, help="Write report JSON to this path (default: artifacts/report.json)")
 
-    args = ap.parse_args()
-
-    project_id = args.project
-    bug_id = args.bug
-    is_buggy = args.version == "b"
-    work_dir = Path(args.workdir).resolve()
-    artifacts_dir = Path(args.artifacts).resolve() if args.artifacts else (work_dir / ".inspector").resolve()
+    project_id = "Lang"
+    bug_id = 1
+    version = "b"
+    is_buggy = version == "b"
+    work_dir = "../tmp/d4j/" + project_id + "_" + str(bug_id) + version
+    work_dir = Path(work_dir).resolve()
+    artifacts_dir = (work_dir / ".inspector").resolve()
+    force_checkout = True
+    test_mode = "relevant"
+    inspect_failing_tests = 1
+    max_candidates = 3
 
     report = run_defects4j_inspection(
         project_id=project_id,
@@ -237,13 +227,13 @@ def main() -> None:
         is_buggy=is_buggy,
         work_dir=work_dir,
         artifacts_dir=artifacts_dir,
-        force_checkout=args.force_checkout,
-        test_mode=args.test_mode,
-        inspect_failing_tests=args.inspect_failing_tests,
-        max_candidates=args.max_candidates,
+        force_checkout=force_checkout,
+        test_mode=test_mode,
+        inspect_failing_tests=inspect_failing_tests,
+        max_candidates=max_candidates,
     )
 
-    with open("output.json", 'w') as f:
+    with open(project_id + str(bug_id) + version + "_inspector_output.json", 'w') as f:
         json.dump(report, f, indent=4)
     print(f"[Inspector] Artifacts dir: {artifacts_dir}")
 
