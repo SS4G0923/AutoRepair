@@ -148,12 +148,21 @@ class Defects4JRunner:
 
         Each block starts with a line: '--- <test_id>'
         The block contains all subsequent lines until the next '--- ' or EOF.
+        If no block headers are present, fall back to line-based parsing.
         """
         f = work_dir / "failing_tests"
         if not f.exists():
             return [], "", {}
 
         raw_text = f.read_text(errors="replace")
+        if "--- " not in raw_text:
+            failing_test_ids = [
+                line.strip()
+                for line in raw_text.splitlines()
+                if line.strip()
+            ]
+            return failing_test_ids, raw_text, {}
+
         failing_test_ids: list[str] = []
         blocks: dict[str, str] = {}
         current_test_id: Optional[str] = None
