@@ -137,22 +137,65 @@ class Defects4JRunner:
         return r.stdout.strip()
 
     @staticmethod
-    def read_failing_tests(work_dir: Path) -> list[str]:
+    def read_failing_tests_blocked(work_dir: Path) -> tuple[list[str], str, dict[str, str]]:
         """
-        Defects4J writes failing tests to file named 'failing_tests' in work_dir.
-        Format varies slightly by project; typically:
-          <fully.qualified.TestClass>::testMethod
+        Read Defects4J failing_tests in block format.
+
+        Returns a tuple of:
+          - failing_test_ids: ordered list of test IDs
+          - raw_text: full file contents
+          - blocks: mapping of test ID -> raw failure block text
+
+        Each block starts with a line: '--- <test_id>'
+        The block contains all subsequent lines until the next '--- ' or EOF.
+        If no block headers are present, fall back to line-based parsing.
         """
         f = work_dir / "failing_tests"
         if not f.exists():
-            return []
-        lines = []
-        for raw in f.read_text(errors="replace").splitlines():
-            s = raw.strip()
-            if not s:
+            return [], "", {}
+
+        raw_text = f.read_text(errors="replace")
+        if "--- " not in raw_text:
+            failing_test_ids = [
+                line.strip()
+                for line in raw_text.splitlines()
+                if line.strip()
+            ]
+            return failing_test_ids, raw_text, {}
+
+        failing_test_ids: list[str] = []
+        blocks: dict[str, str] = {}
+        current_test_id: Optional[str] = None
+        current_lines: list[str] = []
+
+        for line in raw_text.splitlines(keepends=True):
+            if line.startswith("--- "):
+                if current_test_id is not None:
+                    blocks[current_test_id] = "".join(current_lines).rstrip()
+                current_test_id = line[4:].strip()
+                if current_test_id:
+                    failing_test_ids.append(current_test_id)
+                current_lines = []
                 continue
-            lines.append(s)
-        return lines
+
+            if current_test_id is None:
+                continue
+
+            current_lines.append(line)
+
+        if current_test_id is not None:
+            blocks[current_test_id] = "".join(current_lines).rstrip()
+
+        return failing_test_ids, raw_text, blocks
+
+    @staticmethod
+    def read_failing_tests(work_dir: Path) -> list[str]:
+        """
+        Defects4J writes failing tests to file named 'failing_tests' in work_dir.
+        Returns only the failing test identifiers for backward compatibility.
+        """
+        failing_test_ids, _raw_text, _blocks = Defects4JRunner.read_failing_tests_blocked(work_dir)
+        return failing_test_ids
 
     @staticmethod
     def parse_tests_trigger(export_stdout: str) -> list[str]:

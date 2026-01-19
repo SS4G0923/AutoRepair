@@ -29,7 +29,7 @@ class StackTraceEvidence:
 
 
 # Typical "at ..." line
-STACK_FRAME_RE = re.compile(r"^\s*at\s+([\w.$]+)\(([^:()]+):(\d+)\)\s*$")
+STACK_FRAME_RE = re.compile(r"^\s*at\s+(?:[\w.]+/)?([\w.$]+)\(([^:()]+):(\d+)\)\s*$")
 
 # "Caused by: ..." and also plain exception lines
 # Examples:

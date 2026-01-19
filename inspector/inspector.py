@@ -33,6 +33,26 @@ def _safe_relpath(path: Path, base: Path) -> str:
         return str(path.resolve())
 
 
+def _is_valid_test_id(test_id: str) -> bool:
+    if test_id.startswith("--- "):
+        return False
+    if "::" not in test_id:
+        return False
+    return not any(ch.isspace() for ch in test_id)
+
+
+def _has_exception_or_stacktrace(log_text: str) -> bool:
+    evidence = build_evidence_from_log(log_text)
+    if evidence.exception.exception_type != "UnknownException":
+        return True
+    return bool(evidence.frames)
+
+
+def _build_evidence_excerpt(raw_log: str, max_lines: int = 20) -> str:
+    lines = raw_log.splitlines()
+    return "\n".join(lines[:max_lines]).rstrip()
+
+
 def run_defects4j_inspection(
     project_id: str,
     bug_id: int,
@@ -91,7 +111,8 @@ def run_defects4j_inspection(
     _write_text(artifacts_dir / "test.stdout.txt", test_result.stdout)
     _write_text(artifacts_dir / "test.stderr.txt", test_result.stderr)
 
-    failing_tests = runner.read_failing_tests(work_dir)
+    failing_ids, failing_raw, failing_blocks = runner.read_failing_tests_blocked(work_dir)
+    _write_text(artifacts_dir / "failing_tests.raw.txt", failing_raw)
 
     # 5) export triggers
     trigger_export = runner.export(work_dir, "tests.trigger")
@@ -102,14 +123,37 @@ def run_defects4j_inspection(
 
     # 6) pick N failing tests to inspect in detail
     detailed_failures: list[dict[str, Any]] = []
-    for i, t in enumerate(failing_tests[: max(0, inspect_failing_tests)]):
+    inspection_targets = trigger_tests if trigger_tests else failing_ids
+    for i, t in enumerate(inspection_targets[: max(0, inspect_failing_tests)]):
+        if not _is_valid_test_id(t):
+            _write_text(artifacts_dir / f"single_test_{i}.stdout.txt", "")
+            _write_text(artifacts_dir / f"single_test_{i}.stderr.txt", "")
+            detailed_failures.append(
+                {
+                    "failing_test": t,
+                    "raw_log_artifact": f"single_test_{i}.stdout.txt + single_test_{i}.stderr.txt",
+                    "inspector_error": f"Invalid test id format: {t}",
+                    "ranked_candidates": [],
+                    "selected_frame": None,
+                    "suspects": [],
+                }
+            )
+            continue
+
         single = runner.test_single(work_dir, t)
         _write_text(artifacts_dir / f"single_test_{i}.stdout.txt", single.stdout)
         _write_text(artifacts_dir / f"single_test_{i}.stderr.txt", single.stderr)
 
         # Evidence is best extracted from stderr+stdout combined (JUnit output varies)
         raw_log = (single.stdout or "") + "\n" + (single.stderr or "")
+        evidence_source = "single_test_run"
+        if not raw_log.strip() or not _has_exception_or_stacktrace(raw_log):
+            fallback_log = failing_blocks.get(t)
+            if fallback_log is not None:
+                raw_log = fallback_log
+                evidence_source = "failing_tests_file_block"
         evidence = build_evidence_from_log(raw_log)
+        evidence_excerpt = _build_evidence_excerpt(raw_log)
 
         def source_exists_fn(frame) -> bool:
             resolved = resolve_source_for_frame(index, frame.class_name, frame.file_name)
@@ -146,6 +190,8 @@ def run_defects4j_inspection(
                 "exception_type": evidence.exception.exception_type,
                 "exception_message": evidence.exception.message,
                 "raw_log_artifact": f"single_test_{i}.stdout.txt + single_test_{i}.stderr.txt",
+                "evidence_source": evidence_source,
+                "evidence_excerpt": evidence_excerpt,
                 "ranked_candidates": [
                     {
                         "class_name": s.frame.class_name,
@@ -195,7 +241,9 @@ def run_defects4j_inspection(
         },
         "tests": {
             "mode": test_mode,
-            "failing_tests": failing_tests,
+            "failing_tests": failing_ids,
+            "failing_tests_raw_artifact": "failing_tests.raw.txt",
+            "failing_test_blocks_present": len(failing_blocks),
             "trigger_tests": trigger_tests,
         },
         "failures": detailed_failures,
