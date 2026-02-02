@@ -1,0 +1,173 @@
+{
+    "benchmark": "defects4j",
+    "project_id": "Lang",
+    "bug_id": 1,
+    "version": "b",
+    "work_dir": "/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b",
+    "artifacts_dir": "/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b/.inspector",
+    "defects4j": {
+        "checkout": {
+            "cmd": [
+                "/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j",
+                "checkout",
+                "-p",
+                "Lang",
+                "-v",
+                "1b",
+                "-w",
+                "/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b"
+            ],
+            "cwd": "/Users/Zheng/Documents/Develop/Code/AutoRepair",
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "Checking out d1a45e97 to /Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1 OK\nInit local repository...................................................... OK\nTag post-fix revision...................................................... OK\nApply patch................................................................ OK\nApply patch................................................................ OK\nApply patch................................................................ OK\nApply patch................................................................ OK\nRun post-checkout hook..................................................... OK\nExcluding broken/flaky tests............................................... OK\nExcluding broken/flaky tests............................................... OK\nExcluding broken/flaky tests............................................... OK\nBacking up build file: /Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b/ OK\nInitialize fixed program version........................................... OK\nApply patch................................................................ OK\nInitialize buggy program version........................................... OK\nDiff d1a45e97:396afc3e..................................................... OK\nApply patch................................................................ OK\nTag pre-fix revision....................................................... OK\nCheck out program version: Lang-1b......................................... OK\n",
+            "duration_sec": 4.792949914932251
+        },
+        "compile": {
+            "cmd": [
+                "/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j",
+                "compile",
+                "-w",
+                "/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b"
+            ],
+            "cwd": "/Users/Zheng/Documents/Develop/Code/AutoRepair",
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "Running ant (compile)...................................................... OK\nRunning ant (compile.tests)................................................ OK\n",
+            "duration_sec": 20.88364005088806
+        },
+        "test": {
+            "cmd": [
+                "/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j",
+                "test",
+                "-r",
+                "-w",
+                "/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b"
+            ],
+            "cwd": "/Users/Zheng/Documents/Develop/Code/AutoRepair",
+            "returncode": 0,
+            "stdout": "Failing tests: 1\n  - org.apache.commons.lang3.math.NumberUtilsTest::TestLang747\n",
+            "stderr": "Running ant (compile.tests)................................................ OK\nRunning ant (run.dev.tests)................................................ OK\n",
+            "duration_sec": 2.718549966812134
+        },
+        "export_tests_trigger": {
+            "cmd": [
+                "/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j",
+                "export",
+                "-p",
+                "tests.trigger",
+                "-w",
+                "/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b"
+            ],
+            "cwd": "/Users/Zheng/Documents/Develop/Code/AutoRepair",
+            "returncode": 0,
+            "stdout": "org.apache.commons.lang3.math.NumberUtilsTest::TestLang747",
+            "stderr": "Running ant (export.tests.trigger)......................................... OK\n\n",
+            "duration_sec": 1.4704489707946777
+        },
+        "properties": {
+            "dir.src.classes": "src/main/java",
+            "dir.src.tests": "src/test/java"
+        }
+    },
+    "tests": {
+        "mode": "relevant",
+        "failing_tests": [
+            "org.apache.commons.lang3.math.NumberUtilsTest::TestLang747"
+        ],
+        "failing_tests_raw_artifact": "failing_tests.raw.txt",
+        "failing_test_blocks_present": 1,
+        "trigger_tests": [
+            "org.apache.commons.lang3.math.NumberUtilsTest::TestLang747"
+        ]
+    },
+    "failures": [
+        {
+            "failing_test": "org.apache.commons.lang3.math.NumberUtilsTest::TestLang747",
+            "exception_type": "java.lang.NumberFormatException",
+            "exception_message": "For input string: \"80000000\"",
+            "raw_log_artifact": "single_test_0.stdout.txt + single_test_0.stderr.txt",
+            "evidence_source": "failing_tests_file_block",
+            "evidence_excerpt": "java.lang.NumberFormatException: For input string: \"80000000\"\n\tat java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:65)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:652)\n\tat java.base/java.lang.Integer.valueOf(Integer.java:957)\n\tat java.base/java.lang.Integer.decode(Integer.java:1427)\n\tat org.apache.commons.lang3.math.NumberUtils.createInteger(NumberUtils.java:684)\n\tat org.apache.commons.lang3.math.NumberUtils.createNumber(NumberUtils.java:474)\n\tat org.apache.commons.lang3.math.NumberUtilsTest.TestLang747(NumberUtilsTest.java:256)\n\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)\n\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)\n\tat java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)\n\tat java.base/java.lang.reflect.Method.invoke(Method.java:566)\n\tat org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:50)\n\tat org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)\n\tat org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:47)\n\tat org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)\n\tat org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:325)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:78)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:57)\n\tat org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)",
+            "ranked_candidates": [
+                {
+                    "class_name": "org.apache.commons.lang3.math.NumberUtils",
+                    "file_name": "NumberUtils.java",
+                    "line_number": 684,
+                    "index_in_trace": 4,
+                    "raw_line": "\tat org.apache.commons.lang3.math.NumberUtils.createInteger(NumberUtils.java:684)",
+                    "score": 11.5,
+                    "score_reasons": [
+                        "source_exists(+7)",
+                        "early_frame(+3.0)",
+                        "boundary_after_stdlib(+4.0)",
+                        "utility_and_argument_exception(-2.5)"
+                    ]
+                },
+                {
+                    "class_name": "org.apache.commons.lang3.math.NumberUtils",
+                    "file_name": "NumberUtils.java",
+                    "line_number": 474,
+                    "index_in_trace": 5,
+                    "raw_line": "\tat org.apache.commons.lang3.math.NumberUtils.createNumber(NumberUtils.java:474)",
+                    "score": 6.5,
+                    "score_reasons": [
+                        "source_exists(+7)",
+                        "early_frame(+2.0)",
+                        "utility_and_argument_exception(-2.5)"
+                    ]
+                }
+            ],
+            "selected_frame": {
+                "class_name": "org.apache.commons.lang3.math.NumberUtils",
+                "file_name": "NumberUtils.java",
+                "line_number": 684,
+                "index_in_trace": 4,
+                "raw_line": "\tat org.apache.commons.lang3.math.NumberUtils.createInteger(NumberUtils.java:684)",
+                "score": 11.5,
+                "score_reasons": [
+                    "source_exists(+7)",
+                    "early_frame(+3.0)",
+                    "boundary_after_stdlib(+4.0)",
+                    "utility_and_argument_exception(-2.5)"
+                ]
+            },
+            "suspects": [
+                {
+                    "class_name": "org.apache.commons.lang3.math.NumberUtils",
+                    "file_name": "NumberUtils.java",
+                    "line_number": 684,
+                    "source_file": "src/main/java/org/apache/commons/lang3/math/NumberUtils.java",
+                    "resolve_confidence": 0.9,
+                    "resolve_reason": "unique_filename_match",
+                    "score": 11.5,
+                    "score_reasons": [
+                        "source_exists(+7)",
+                        "early_frame(+3.0)",
+                        "boundary_after_stdlib(+4.0)",
+                        "utility_and_argument_exception(-2.5)"
+                    ],
+                    "snippet": "     676:      * @return converted <code>Integer</code> (or null if the input is null)\n     677:      * @throws NumberFormatException if the value cannot be converted\n     678:      */\n     679:     public static Integer createInteger(final String str) {\n     680:         if (str == null) {\n     681:             return null;\n     682:         }\n     683:         // decode() handles 0xAABD and 0777 (hex and octal) as well.\n>>   684:         return Integer.decode(str);\n     685:     }\n     686: \n     687:     /**\n     688:      * <p>Convert a <code>String</code> to a <code>Long</code>; \n     689:      * since 3.1 it handles hex and octal notations.</p>\n     690:      * \n     691:      * <p>Returns <code>null</code> if the string is <code>null</code>.</p>\n     692:      *",
+                    "enclosing_method": "     669:     /**\n     670:      * <p>Convert a <code>String</code> to a <code>Integer</code>, handling\n     671:      * hex and octal notations.</p>\n     672:      *\n     673:      * <p>Returns <code>null</code> if the string is <code>null</code>.</p>\n     674:      * \n     675:      * @param str  a <code>String</code> to convert, may be null\n     676:      * @return converted <code>Integer</code> (or null if the input is null)\n     677:      * @throws NumberFormatException if the value cannot be converted\n     678:      */\n     679:     public static Integer createInteger(final String str) {\n     680:         if (str == null) {\n     681:             return null;\n     682:         }\n     683:         // decode() handles 0xAABD and 0777 (hex and octal) as well.\n>>   684:         return Integer.decode(str);\n     685:     }"
+                },
+                {
+                    "class_name": "org.apache.commons.lang3.math.NumberUtils",
+                    "file_name": "NumberUtils.java",
+                    "line_number": 474,
+                    "source_file": "src/main/java/org/apache/commons/lang3/math/NumberUtils.java",
+                    "resolve_confidence": 0.9,
+                    "resolve_reason": "unique_filename_match",
+                    "score": 6.5,
+                    "score_reasons": [
+                        "source_exists(+7)",
+                        "early_frame(+2.0)",
+                        "utility_and_argument_exception(-2.5)"
+                    ],
+                    "snippet": "     466:         if (pfxLen > 0) { // we have a hex number\n     467:             final int hexDigits = str.length() - pfxLen;\n     468:             if (hexDigits > 16) { // too many for Long\n     469:                 return createBigInteger(str);\n     470:             }\n     471:             if (hexDigits > 8) { // too many for an int\n     472:                 return createLong(str);\n     473:             }\n>>   474:             return createInteger(str);\n     475:         }\n     476:         final char lastChar = str.charAt(str.length() - 1);\n     477:         String mant;\n     478:         String dec;\n     479:         String exp;\n     480:         final int decPos = str.indexOf('.');\n     481:         final int expPos = str.indexOf('e') + str.indexOf('E') + 1; // assumes both not present\n     482:         // if both e and E are present, this is caught by the checks on expPos (which prevent IOOBE)",
+                    "enclosing_method": "     449:      */\n     450:     public static Number createNumber(final String str) throws NumberFormatException {\n     451:         if (str == null) {\n     452:             return null;\n     453:         }\n     454:         if (StringUtils.isBlank(str)) {\n     455:             throw new NumberFormatException(\"A blank string is not a valid number\");\n     456:         }\n     457:         // Need to deal with all possible hex prefixes here\n     458:         final String[] hex_prefixes = {\"0x\", \"0X\", \"-0x\", \"-0X\", \"#\", \"-#\"};\n     459:         int pfxLen = 0;\n     460:         for(final String pfx : hex_prefixes) {\n     461:             if (str.startsWith(pfx)) {\n     462:                 pfxLen += pfx.length();\n     463:                 break;\n     464:             }\n     465:         }\n     466:         if (pfxLen > 0) { // we have a hex number\n     467:             final int hexDigits = str.length() - pfxLen;\n     468:             if (hexDigits > 16) { // too many for Long\n     469:                 return createBigInteger(str);\n     470:             }\n     471:             if (hexDigits > 8) { // too many for an int\n     472:                 return createLong(str);\n     473:             }\n>>   474:             return createInteger(str);\n     475:         }\n     476:         final char lastChar = str.charAt(str.length() - 1);\n     477:         String mant;\n     478:         String dec;\n     479:         String exp;\n     480:         final int decPos = str.indexOf('.');\n     481:         final int expPos = str.indexOf('e') + str.indexOf('E') + 1; // assumes both not present\n     482:         // if both e and E are present, this is caught by the checks on expPos (which prevent IOOBE)\n     483:         // and the parsing which will detect if e or E appear in a number due to using the wrong offset\n     484: \n     485:         int numDecimals = 0; // Check required precision (LANG-693)\n     486:         if (decPos > -1) { // there is a decimal point\n     487: \n     488:             if (expPos > -1) { // there is an exponent\n     489:                 if (expPos < decPos || expPos > str.length()) { // prevents double exponent causing IOOBE\n     490:                     throw new NumberFormatException(str + \" is not a valid number.\");\n     491:                 }\n     492:                 dec = str.substring(decPos + 1, expPos);\n     493:             } else {\n     494:                 dec = str.substring(decPos + 1);\n     495:             }\n     496:             mant = str.substring(0, decPos);\n     497:             numDecimals = dec.length(); // gets number of digits past the decimal to ensure no loss of precision for floating point numbers.\n     498:         } else {"
+                }
+            ]
+        }
+    ],
+    "planner_prompt": "You are the Planner Agent for Automated Program Repair.\n\nRules:\n- Do NOT write code.\n- Produce a minimal, actionable repair plan grounded in the Inspector evidence.\n- If evidence is insufficient, request exactly what additional evidence is needed.\n- Focus on correctness, minimal changes, and avoiding test overfitting.\n- Provide side-effect analysis: what could break and why.\n\n\n=== INSPECTOR REPORT (JSON) ===\n{\n  \"benchmark\": \"defects4j\",\n  \"project_id\": \"Lang\",\n  \"bug_id\": 1,\n  \"version\": \"b\",\n  \"work_dir\": \"/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b\",\n  \"artifacts_dir\": \"/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b/.inspector\",\n  \"defects4j\": {\n    \"checkout\": {\n      \"cmd\": [\n        \"/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j\",\n        \"checkout\",\n        \"-p\",\n        \"Lang\",\n        \"-v\",\n        \"1b\",\n        \"-w\",\n        \"/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b\"\n      ],\n      \"cwd\": \"/Users/Zheng/Documents/Develop/Code/AutoRepair\",\n      \"returncode\": 0,\n      \"stdout\": \"\",\n      \"stderr\": \"Checking out d1a45e97 to /Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1 OK\\nInit local repository...................................................... OK\\nTag post-fix revision...................................................... OK\\nApply patch................................................................ OK\\nApply patch................................................................ OK\\nApply patch................................................................ OK\\nApply patch................................................................ OK\\nRun post-checkout hook..................................................... OK\\nExcluding broken/flaky tests............................................... OK\\nExcluding broken/flaky tests............................................... OK\\nExcluding broken/flaky tests............................................... OK\\nBacking up build file: /Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b/ OK\\nInitialize fixed program version........................................... OK\\nApply patch................................................................ OK\\nInitialize buggy program version........................................... OK\\nDiff d1a45e97:396afc3e..................................................... OK\\nApply patch................................................................ OK\\nTag pre-fix revision....................................................... OK\\nCheck out program version: Lang-1b......................................... OK\\n\",\n      \"duration_sec\": 4.792949914932251\n    },\n    \"compile\": {\n      \"cmd\": [\n        \"/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j\",\n        \"compile\",\n        \"-w\",\n        \"/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b\"\n      ],\n      \"cwd\": \"/Users/Zheng/Documents/Develop/Code/AutoRepair\",\n      \"returncode\": 0,\n      \"stdout\": \"\",\n      \"stderr\": \"Running ant (compile)...................................................... OK\\nRunning ant (compile.tests)................................................ OK\\n\",\n      \"duration_sec\": 20.88364005088806\n    },\n    \"test\": {\n      \"cmd\": [\n        \"/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j\",\n        \"test\",\n        \"-r\",\n        \"-w\",\n        \"/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b\"\n      ],\n      \"cwd\": \"/Users/Zheng/Documents/Develop/Code/AutoRepair\",\n      \"returncode\": 0,\n      \"stdout\": \"Failing tests: 1\\n  - org.apache.commons.lang3.math.NumberUtilsTest::TestLang747\\n\",\n      \"stderr\": \"Running ant (compile.tests)................................................ OK\\nRunning ant (run.dev.tests)................................................ OK\\n\",\n      \"duration_sec\": 2.718549966812134\n    },\n    \"export_tests_trigger\": {\n      \"cmd\": [\n        \"/Users/Zheng/Documents/Develop/Code/defects4j/framework/bin/defects4j\",\n        \"export\",\n        \"-p\",\n        \"tests.trigger\",\n        \"-w\",\n        \"/Users/Zheng/Documents/Develop/Code/tmp/d4j/Lang_1b\"\n      ],\n      \"cwd\": \"/Users/Zheng/Documents/Develop/Code/AutoRepair\",\n      \"returncode\": 0,\n      \"stdout\": \"org.apache.commons.lang3.math.NumberUtilsTest::TestLang747\",\n      \"stderr\": \"Running ant (export.tests.trigger)......................................... OK\\n\\n\",\n      \"duration_sec\": 1.4704489707946777\n    },\n    \"properties\": {\n      \"dir.src.classes\": \"src/main/java\",\n      \"dir.src.tests\": \"src/test/java\"\n    }\n  },\n  \"tests\": {\n    \"mode\": \"relevant\",\n    \"failing_tests\": [\n      \"org.apache.commons.lang3.math.NumberUtilsTest::TestLang747\"\n    ],\n    \"failing_tests_raw_artifact\": \"failing_tests.raw.txt\",\n    \"failing_test_blocks_present\": 1,\n    \"trigger_tests\": [\n      \"org.apache.commons.lang3.math.NumberUtilsTest::TestLang747\"\n    ]\n  },\n  \"failures\": [\n    {\n      \"failing_test\": \"org.apache.commons.lang3.math.NumberUtilsTest::TestLang747\",\n      \"exception_type\": \"java.lang.NumberFormatException\",\n      \"exception_message\": \"For input string: \\\"80000000\\\"\",\n      \"raw_log_artifact\": \"single_test_0.stdout.txt + single_test_0.stderr.txt\",\n      \"evidence_source\": \"failing_tests_file_block\",\n      \"evidence_excerpt\": \"java.lang.NumberFormatException: For input string: \\\"80000000\\\"\\n\\tat java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:65)\\n\\tat java.base/java.lang.Integer.parseInt(Integer.java:652)\\n\\tat java.base/java.lang.Integer.valueOf(Integer.java:957)\\n\\tat java.base/java.lang.Integer.decode(Integer.java:1427)\\n\\tat org.apache.commons.lang3.math.NumberUtils.createInteger(NumberUtils.java:684)\\n\\tat org.apache.commons.lang3.math.NumberUtils.createNumber(NumberUtils.java:474)\\n\\tat org.apache.commons.lang3.math.NumberUtilsTest.TestLang747(NumberUtilsTest.java:256)\\n\\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)\\n\\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)\\n\\tat java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)\\n\\tat java.base/java.lang.reflect.Method.invoke(Method.java:566)\\n\\tat org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:50)\\n\\tat org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)\\n\\tat org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:47)\\n\\tat org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)\\n\\tat org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:325)\\n\\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:78)\\n\\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:57)\\n\\tat org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)\",\n      \"ranked_candidates\": [\n        {\n          \"class_name\": \"org.apache.commons.lang3.math.NumberUtils\",\n          \"file_name\": \"NumberUtils.java\",\n          \"line_number\": 684,\n          \"index_in_trace\": 4,\n          \"raw_line\": \"\\tat org.apache.commons.lang3.math.NumberUtils.createInteger(NumberUtils.java:684)\",\n          \"score\": 11.5,\n          \"score_reasons\": [\n            \"source_exists(+7)\",\n            \"early_frame(+3.0)\",\n            \"boundary_after_stdlib(+4.0)\",\n            \"utility_and_argument_exception(-2.5)\"\n          ]\n        },\n        {\n          \"class_name\": \"org.apache.commons.lang3.math.NumberUtils\",\n          \"file_name\": \"NumberUtils.java\",\n          \"line_number\": 474,\n          \"index_in_trace\": 5,\n          \"raw_line\": \"\\tat org.apache.commons.lang3.math.NumberUtils.createNumber(NumberUtils.java:474)\",\n          \"score\": 6.5,\n          \"score_reasons\": [\n            \"source_exists(+7)\",\n            \"early_frame(+2.0)\",\n            \"utility_and_argument_exception(-2.5)\"\n          ]\n        }\n      ],\n      \"selected_frame\": {\n        \"class_name\": \"org.apache.commons.lang3.math.NumberUtils\",\n        \"file_name\": \"NumberUtils.java\",\n        \"line_number\": 684,\n        \"index_in_trace\": 4,\n        \"raw_line\": \"\\tat org.apache.commons.lang3.math.NumberUtils.createInteger(NumberUtils.java:684)\",\n        \"score\": 11.5,\n        \"score_reasons\": [\n          \"source_exists(+7)\",\n          \"early_frame(+3.0)\",\n          \"boundary_after_stdlib(+4.0)\",\n          \"utility_and_argument_exception(-2.5)\"\n        ]\n      },\n      \"suspects\": [\n        {\n          \"class_name\": \"org.apache.commons.lang3.math.NumberUtils\",\n          \"file_name\": \"NumberUtils.java\",\n          \"line_number\": 684,\n          \"source_file\": \"src/main/java/org/apache/commons/lang3/math/NumberUtils.java\",\n          \"resolve_confidence\": 0.9,\n          \"resolve_reason\": \"unique_filename_match\",\n          \"score\": 11.5,\n          \"score_reasons\": [\n            \"source_exists(+7)\",\n            \"early_frame(+3.0)\",\n            \"boundary_after_stdlib(+4.0)\",\n            \"utility_and_argument_exception(-2.5)\"\n          ],\n          \"snippet\": \"     676:      * @return converted <code>Integer</code> (or null if the input is null)\\n     677:      * @throws NumberFormatException if the value cannot be converted\\n     678:      */\\n     679:     public static Integer createInteger(final String str) {\\n     680:         if (str == null) {\\n     681:             return null;\\n     682:         }\\n     683:         // decode() handles 0xAABD and 0777 (hex and octal) as well.\\n>>   684:         return Integer.decode(str);\\n     685:     }\\n     686: \\n     687:     /**\\n     688:      * <p>Convert a <code>String</code> to a <code>Long</code>; \\n     689:      * since 3.1 it handles hex and octal notations.</p>\\n     690:      * \\n     691:      * <p>Returns <code>null</code> if the string is <code>null</code>.</p>\\n     692:      *\",\n          \"enclosing_method\": \"     669:     /**\\n     670:      * <p>Convert a <code>String</code> to a <code>Integer</code>, handling\\n     671:      * hex and octal notations.</p>\\n     672:      *\\n     673:      * <p>Returns <code>null</code> if the string is <code>null</code>.</p>\\n     674:      * \\n     675:      * @param str  a <code>String</code> to convert, may be null\\n     676:      * @return converted <code>Integer</code> (or null if the input is null)\\n     677:      * @throws NumberFormatException if the value cannot be converted\\n     678:      */\\n     679:     public static Integer createInteger(final String str) {\\n     680:         if (str == null) {\\n     681:             return null;\\n     682:         }\\n     683:         // decode() handles 0xAABD and 0777 (hex and octal) as well.\\n>>   684:         return Integer.decode(str);\\n     685:     }\"\n        },\n        {\n          \"class_name\": \"org.apache.commons.lang3.math.NumberUtils\",\n          \"file_name\": \"NumberUtils.java\",\n          \"line_number\": 474,\n          \"source_file\": \"src/main/java/org/apache/commons/lang3/math/NumberUtils.java\",\n          \"resolve_confidence\": 0.9,\n          \"resolve_reason\": \"unique_filename_match\",\n          \"score\": 6.5,\n          \"score_reasons\": [\n            \"source_exists(+7)\",\n            \"early_frame(+2.0)\",\n            \"utility_and_argument_exception(-2.5)\"\n          ],\n          \"snippet\": \"     466:         if (pfxLen > 0) { // we have a hex number\\n     467:             final int hexDigits = str.length() - pfxLen;\\n     468:             if (hexDigits > 16) { // too many for Long\\n     469:                 return createBigInteger(str);\\n     470:             }\\n     471:             if (hexDigits > 8) { // too many for an int\\n     472:                 return createLong(str);\\n     473:             }\\n>>   474:             return createInteger(str);\\n     475:         }\\n     476:         final char lastChar = str.charAt(str.length() - 1);\\n     477:         String mant;\\n     478:         String dec;\\n     479:         String exp;\\n     480:         final int decPos = str.indexOf('.');\\n     481:         final int expPos = str.indexOf('e') + str.indexOf('E') + 1; // assumes both not present\\n     482:         // if both e and E are present, this is caught by the checks on expPos (which prevent IOOBE)\",\n          \"enclosing_method\": \"     449:      */\\n     450:     public static Number createNumber(final String str) throws NumberFormatException {\\n     451:         if (str == null) {\\n     452:             return null;\\n     453:         }\\n     454:         if (StringUtils.isBlank(str)) {\\n     455:             throw new NumberFormatException(\\\"A blank string is not a valid number\\\");\\n     456:         }\\n     457:         // Need to deal with all possible hex prefixes here\\n     458:         final String[] hex_prefixes = {\\\"0x\\\", \\\"0X\\\", \\\"-0x\\\", \\\"-0X\\\", \\\"#\\\", \\\"-#\\\"};\\n     459:         int pfxLen = 0;\\n     460:         for(final String pfx : hex_prefixes) {\\n     461:             if (str.startsWith(pfx)) {\\n     462:                 pfxLen += pfx.length();\\n     463:                 break;\\n     464:             }\\n     465:         }\\n     466:         if (pfxLen > 0) { // we have a hex number\\n     467:             final int hexDigits = str.length() - pfxLen;\\n     468:             if (hexDigits > 16) { // too many for Long\\n     469:                 return createBigInteger(str);\\n     470:             }\\n     471:             if (hexDigits > 8) { // too many for an int\\n     472:                 return createLong(str);\\n     473:             }\\n>>   474:             return createInteger(str);\\n     475:         }\\n     476:         final char lastChar = str.charAt(str.length() - 1);\\n     477:         String mant;\\n     478:         String dec;\\n     479:         String exp;\\n     480:         final int decPos = str.indexOf('.');\\n     481:         final int expPos = str.indexOf('e') + str.indexOf('E') + 1; // assumes both not present\\n     482:         // if both e and E are present, this is caught by the checks on expPos (which prevent IOOBE)\\n     483:         // and the parsing which will detect if e or E appear in a number due to using the wrong offset\\n     484: \\n     485:         int numDecimals = 0; // Check required precision (LANG-693)\\n     486:         if (decPos > -1) { // there is a decimal point\\n     487: \\n     488:             if (expPos > -1) { // there is an exponent\\n     489:                 if (expPos < decPos || expPos > str.length()) { // prevents double exponent causing IOOBE\\n     490:                     throw new NumberFormatException(str + \\\" is not a valid number.\\\");\\n     491:                 }\\n     492:                 dec = str.substring(decPos + 1, expPos);\\n     493:             } else {\\n     494:                 dec = str.substring(decPos + 1);\\n     495:             }\\n     496:             mant = str.substring(0, decPos);\\n     497:             numDecimals = dec.length(); // gets number of digits past the decimal to ensure no loss of precision for floating point numbers.\\n     498:         } else {\"\n        }\n      ]\n    }\n  ]\n}\n\n=== TASK ===\n1) Identify the most likely root cause.\n2) Propose a minimal repair plan (NO CODE).\n3) State risks / side effects and how to validate.\n4) If multiple hypotheses exist, list them and choose the best supported by evidence.\n"
+}
