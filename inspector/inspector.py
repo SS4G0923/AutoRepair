@@ -261,7 +261,7 @@ def main() -> None:
     bug_id = 1
     version = "b"
     is_buggy = version == "b"
-    work_dir = "../tmp/d4j/" + project_id + "_" + str(bug_id) + version
+    work_dir = "./tmp/d4j/" + project_id + "_" + str(bug_id) + version
     work_dir = Path(work_dir).resolve()
     artifacts_dir = (work_dir / ".inspector").resolve()
     force_checkout = True

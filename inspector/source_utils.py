@@ -4,8 +4,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
-
+from typing import Iterable, Optional, Tuple
 
 _METHOD_DECL_RE = re.compile(
     r"""
@@ -121,55 +120,248 @@ def extract_code_snippet(
     return "\n".join(out)
 
 
+# A fairly permissive method/ctor “header” detector for the first line of a signature.
+_METHOD_HEAD_RE = re.compile(
+    r"^\s*(?:public|protected|private|static|final|abstract|synchronized|native|strictfp|\s)+"
+    r"[\w\<\>\[\], ?.$]+?\s+[\w$]+\s*\(.*$"
+)
+_CTOR_HEAD_RE = re.compile(
+    r"^\s*(?:public|protected|private)\s+[\w$]+\s*\(.*$"
+)
+
+_CONTROL_KEYWORDS = ("if", "for", "while", "switch", "catch", "do", "try", "synchronized")
+
+
+@dataclass
+class _LexState:
+    in_block_comment: bool = False
+    in_string: bool = False
+    in_char: bool = False
+    escape: bool = False
+
+
+def _strip_java_line_for_braces(line: str, st: _LexState) -> str:
+    """
+    Remove content inside strings/chars/comments so brace counting is accurate.
+    Maintains state across lines for block comments and strings.
+    """
+    out = []
+    i = 0
+    n = len(line)
+
+    while i < n:
+        c = line[i]
+        nxt = line[i + 1] if i + 1 < n else ""
+
+        # Block comment
+        if st.in_block_comment:
+            if c == "*" and nxt == "/":
+                st.in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+
+        # Line comment
+        if not st.in_string and not st.in_char and c == "/" and nxt == "/":
+            break
+
+        # Start block comment
+        if not st.in_string and not st.in_char and c == "/" and nxt == "*":
+            st.in_block_comment = True
+            i += 2
+            continue
+
+        # String literal
+        if st.in_string:
+            if st.escape:
+                st.escape = False
+                i += 1
+                continue
+            if c == "\\":
+                st.escape = True
+                i += 1
+                continue
+            if c == '"':
+                st.in_string = False
+            i += 1
+            continue
+
+        # Char literal
+        if st.in_char:
+            if st.escape:
+                st.escape = False
+                i += 1
+                continue
+            if c == "\\":
+                st.escape = True
+                i += 1
+                continue
+            if c == "'":
+                st.in_char = False
+            i += 1
+            continue
+
+        # Enter string/char
+        if c == '"':
+            st.in_string = True
+            i += 1
+            continue
+        if c == "'":
+            st.in_char = True
+            i += 1
+            continue
+
+        # Keep non-comment, non-string characters
+        out.append(c)
+        i += 1
+
+    return "".join(out)
+
+
+def _looks_like_signature_start(line: str) -> bool:
+    s = line.strip()
+    if not s:
+        return False
+    # Avoid grabbing control statements
+    for kw in _CONTROL_KEYWORDS:
+        if s.startswith(kw + " " ) or s.startswith(kw + "("):
+            return False
+    if _METHOD_HEAD_RE.match(line) or _CTOR_HEAD_RE.match(line):
+        return True
+    return False
+
+
+def _find_signature_span(lines: list[str], anchor_idx: int, max_scan_up: int) -> Optional[Tuple[int, int]]:
+    """
+    Find a (start_idx, end_idx) span of the method signature (may be multiline),
+    where end_idx is the last signature line (may contain '{' or ')', etc).
+    """
+    start_idx = None
+    for i in range(anchor_idx, max(-1, anchor_idx - max_scan_up), -1):
+        if _looks_like_signature_start(lines[i]):
+            start_idx = i
+            break
+    if start_idx is None:
+        return None
+
+    # Extend downward until parentheses balance closes (signature may span multiple lines).
+    paren = 0
+    st = _LexState()
+    end_idx = start_idx
+    saw_paren = False
+
+    for j in range(start_idx, min(len(lines), start_idx + 80)):
+        clean = _strip_java_line_for_braces(lines[j], st)  # also strips comments/strings
+        for ch in clean:
+            if ch == "(":
+                paren += 1
+                saw_paren = True
+            elif ch == ")":
+                paren -= 1
+        end_idx = j
+        if saw_paren and paren <= 0:
+            break
+
+    return (start_idx, end_idx)
+
+
+def _include_leading_javadoc_and_annotations(lines: list[str], sig_start: int) -> int:
+    """
+    Pull in contiguous annotations and Javadoc immediately above the signature.
+    """
+    i = sig_start - 1
+    while i >= 0:
+        s = lines[i].strip()
+        if not s:
+            # stop at blank line boundary
+            break
+        if s.startswith("@"):
+            i -= 1
+            continue
+        # Javadoc block
+        if s.startswith("*/") or s.startswith("*") or s.startswith("/**") or s.startswith("/*"):
+            i -= 1
+            continue
+        break
+    return i + 1
+
+
 def extract_enclosing_method(
     source_file: Path,
     line_number: int,
-    max_scan_up: int = 200,
-    max_scan_down: int = 400,
+    max_scan_up: int = 250,
+    max_scan_down: int = 800,
 ) -> str:
     """
-    Heuristic method extraction:
-      - scan upward to find a likely method declaration
-      - then scan downward counting braces to find end
-    Not a full Java parser, but works well enough for localized context.
+    Extract the enclosing Java method block (signature + body) around line_number.
+
+    Precision improvements:
+    - multiline signature support
+    - include Javadoc/annotations
+    - brace matching ignores braces in strings/comments
     """
     lines = source_file.read_text(errors="replace").splitlines()
+    if not lines:
+        return ""
+
     target_idx = max(0, min(len(lines) - 1, line_number - 1))
 
-    # 1) find start
-    start_idx = None
-    for i in range(target_idx, max(-1, target_idx - max_scan_up), -1):
-        if _METHOD_DECL_RE.match(lines[i]):
-            start_idx = i
+    span = _find_signature_span(lines, target_idx, max_scan_up=max_scan_up)
+    if span is None:
+        # fallback: return a wide snippet
+        start = max(0, target_idx - 25)
+        end = min(len(lines), target_idx + 25)
+        return "\n".join(f"{'>>' if i==target_idx else '  '} {i+1:5d}: {lines[i]}" for i in range(start, end))
+
+    sig_start, sig_end = span
+    sig_start = _include_leading_javadoc_and_annotations(lines, sig_start)
+
+    # Find the opening brace '{' that starts the method body
+    st = _LexState()
+    open_line = None
+    open_pos = None
+
+    for j in range(sig_end, min(len(lines), sig_end + 40)):
+        clean = _strip_java_line_for_braces(lines[j], st)
+        pos = clean.find("{")
+        if pos != -1:
+            open_line = j
+            open_pos = pos
             break
-        # handle constructors (no return type): "public Foo(...) {"
-        if re.match(r"^\s*(public|protected|private)\s+[\w$]+\s*\([^;]*\)\s*\{?\s*$", lines[i]):
-            start_idx = i
+        # Interface/abstract method could end with ';'
+        if ";" in clean and "(" in clean and ")" in clean:
+            # No body
+            start = max(0, target_idx - 25)
+            end = min(len(lines), target_idx + 25)
+            return "\n".join(f"{'>>' if i==target_idx else '  '} {i+1:5d}: {lines[i]}" for i in range(start, end))
+
+    if open_line is None:
+        # fallback
+        start = max(0, target_idx - 25)
+        end = min(len(lines), target_idx + 25)
+        return "\n".join(f"{'>>' if i==target_idx else '  '} {i+1:5d}: {lines[i]}" for i in range(start, end))
+
+    # Brace match from the opening brace
+    brace = 0
+    st2 = _LexState()
+    end_idx = open_line
+
+    for k in range(open_line, min(len(lines), open_line + max_scan_down)):
+        clean = _strip_java_line_for_braces(lines[k], st2)
+        # Count braces
+        for ch in clean:
+            if ch == "{":
+                brace += 1
+            elif ch == "}":
+                brace -= 1
+        end_idx = k
+        if brace == 0 and k > open_line:
             break
 
-    if start_idx is None:
-        # fallback: return a wider snippet around the line
-        return extract_code_snippet(source_file, line_number, window=20)
-
-    # 2) find end by brace matching
-    brace_balance = 0
-    end_idx = start_idx
-    opened = False
-
-    for j in range(start_idx, min(len(lines), start_idx + max_scan_down)):
-        line = lines[j]
-        # naive brace count (strings/comments ignored)
-        brace_balance += line.count("{")
-        brace_balance -= line.count("}")
-        if line.count("{") > 0:
-            opened = True
-        end_idx = j
-        if opened and brace_balance <= 0 and j > start_idx:
-            break
-
-    # 3) render block
+    # Render block
     block = []
-    for k in range(start_idx, end_idx + 1):
-        prefix = ">>" if k == target_idx else "  "
-        block.append(f"{prefix} {k+1:5d}: {lines[k]}")
+    for i in range(sig_start, end_idx + 1):
+        prefix = ">>" if i == target_idx else "  "
+        block.append(f"{prefix} {i+1:5d}: {lines[i]}")
     return "\n".join(block)
