@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
+from call_llm import call_llm_for_json
 from defects4j_runner import Defects4JRunner, Defects4JError
 from stacktrace_filter import (
     build_evidence_from_log,
@@ -51,7 +52,6 @@ def _has_exception_or_stacktrace(log_text: str) -> bool:
 def _build_evidence_excerpt(raw_log: str, max_lines: int = 20) -> str:
     lines = raw_log.splitlines()
     return "\n".join(lines[:max_lines]).rstrip()
-
 
 def run_defects4j_inspection(
     project_id: str,
@@ -249,42 +249,4 @@ def run_defects4j_inspection(
         "failures": detailed_failures,
     }
 
-    # Optional: embed planner prompt for convenience
-    report["planner_prompt"] = build_planner_prompt(report)
-
     return report
-
-
-def main() -> None:
-
-    project_id = "Lang"
-    bug_id = 1
-    version = "b"
-    is_buggy = version == "b"
-    work_dir = "./tmp/d4j/" + project_id + "_" + str(bug_id) + version
-    work_dir = Path(work_dir).resolve()
-    artifacts_dir = (work_dir / ".inspector").resolve()
-    force_checkout = True
-    test_mode = "relevant"
-    inspect_failing_tests = 1
-    max_candidates = 3
-
-    report = run_defects4j_inspection(
-        project_id=project_id,
-        bug_id=bug_id,
-        is_buggy=is_buggy,
-        work_dir=work_dir,
-        artifacts_dir=artifacts_dir,
-        force_checkout=force_checkout,
-        test_mode=test_mode,
-        inspect_failing_tests=inspect_failing_tests,
-        max_candidates=max_candidates,
-    )
-
-    with open(project_id + str(bug_id) + version + "_inspector_output.json", 'w') as f:
-        json.dump(report, f, indent=4)
-    print(f"[Inspector] Artifacts dir: {artifacts_dir}")
-
-
-if __name__ == "__main__":
-    main()

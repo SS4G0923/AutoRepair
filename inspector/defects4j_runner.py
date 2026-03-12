@@ -38,11 +38,9 @@ def _resolve_defects4j_executable() -> str:
     if which:
         return which
     else:
-        return "perl "+str(Path("..\\..\\defects4j\\framework\\bin\\defects4j").resolve())
-
-    raise Defects4JError(
-        "Cannot find defects4j executable. Set D4J_HOME or add defects4j to PATH."
-    )
+        raise Defects4JError(
+            "Cannot find defects4j executable. Set D4J_HOME or add defects4j to PATH."
+        )
 
 
 def run_cmd(
