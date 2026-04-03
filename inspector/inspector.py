@@ -1,25 +1,22 @@
 # inspector/inspector.py
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from call_llm import call_llm_for_json
-from defects4j_runner import Defects4JRunner, Defects4JError
-from stacktrace_filter import (
+from inspector.defects4j_runner import Defects4JRunner, Defects4JError
+from inspector.stacktrace_filter import (
     build_evidence_from_log,
     choose_best_frame,
     filter_and_rank_frames,
 )
-from source_utils import (
+from inspector.source_utils import (
     SourceIndex,
     resolve_source_for_frame,
     extract_code_snippet,
     extract_enclosing_method,
 )
-from inspector_prompt import build_planner_prompt
 
 
 def _write_text(p: Path, s: str) -> None:
