@@ -10,6 +10,12 @@ interface StageCardProps {
     thinking: string;
     noContent: string;
     reportLabel: string;
+    toolCallsLabel: string;
+    toolCallsEmpty: string;
+    toolArguments: string;
+    toolOutput: string;
+    toolStarted: string;
+    toolCompleted: string;
     stageWaiting: string;
     stageActive: string;
     stageDone: string;
@@ -61,6 +67,65 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
           </pre>
         </div>
       ) : null}
+
+      <div className="mt-4">
+        <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+          {copy.toolCallsLabel}
+        </div>
+        {state.toolEvents.length > 0 ? (
+          <div className="max-h-60 space-y-3 overflow-y-auto rounded-3xl border border-black/5 bg-black/[0.03] p-4 dark:border-white/10 dark:bg-white/[0.03]">
+            {state.toolEvents.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-[22px] border border-black/5 bg-white/70 p-3 dark:border-white/10 dark:bg-slate-950/70"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-xs text-slate-900 dark:text-white">
+                      {item.tool_name}
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500 dark:text-white/40">
+                      {item.round ? `round ${item.round}` : null}
+                      {item.round && item.at ? " · " : null}
+                      {item.at}
+                    </div>
+                  </div>
+                  <div className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-600 dark:border-white/10 dark:text-white/60">
+                    {item.status === "completed" ? copy.toolCompleted : copy.toolStarted}
+                  </div>
+                </div>
+
+                {item.arguments ? (
+                  <div className="mt-3">
+                    <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-white/35">
+                      {copy.toolArguments}
+                    </div>
+                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/72">
+                      {item.arguments}
+                    </pre>
+                  </div>
+                ) : null}
+
+                {item.output_preview ? (
+                  <div className="mt-3">
+                    <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-white/35">
+                      {copy.toolOutput}
+                    </div>
+                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/72">
+                      {item.output_preview}
+                      {item.output_truncated ? "\n..." : ""}
+                    </pre>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-3xl border border-black/5 bg-black/[0.03] px-4 py-3 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/45">
+            {copy.toolCallsEmpty}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

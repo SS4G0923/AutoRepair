@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from typing import Any, Callable
+from dotenv import load_dotenv
 from google import genai
 
 DEFAULT_MODEL = "gemini-2.5-pro"
@@ -16,7 +17,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "fix."
 )
 
-API_KEY = "AIzaSyAVtW21YbrEb-Y1hd5nSodPYVCoNnfpRV0"
+load_dotenv()
+
+API_KEY = os.getenv("GEMINI_API_KEY")
 
 
 class LLMCallError(RuntimeError):
@@ -50,6 +53,61 @@ def _extract_response_text(response: Any) -> str:
         return "\n".join(text_parts)
 
     raise LLMCallError("Gemini response did not contain text content.")
+
+
+def _json_candidates(response_text: str) -> list[str]:
+    stripped = response_text.strip()
+    candidates: list[str] = []
+
+    def add(candidate: str) -> None:
+        normalized = candidate.strip()
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    add(stripped)
+
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2:
+            inner_lines = lines[1:]
+            if inner_lines and inner_lines[-1].strip() == "```":
+                inner_lines = inner_lines[:-1]
+            add("\n".join(inner_lines))
+
+    fence_start = stripped.find("```")
+    if fence_start != -1:
+        fence_end = stripped.find("```", fence_start + 3)
+        if fence_end != -1:
+            fenced = stripped[fence_start + 3 : fence_end].lstrip()
+            if fenced.startswith("json"):
+                fenced = fenced[4:].lstrip()
+            add(fenced)
+
+    object_start = stripped.find("{")
+    object_end = stripped.rfind("}")
+    if object_start != -1 and object_end != -1 and object_end > object_start:
+        add(stripped[object_start : object_end + 1])
+
+    array_start = stripped.find("[")
+    array_end = stripped.rfind("]")
+    if array_start != -1 and array_end != -1 and array_end > array_start:
+        add(stripped[array_start : array_end + 1])
+
+    return candidates
+
+
+def _parse_json_response(response_text: str) -> dict[str, Any]:
+    for candidate in _json_candidates(response_text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    raise LLMCallError(
+        "Model response was not valid JSON. "
+        f"Raw response: {response_text[:500]}"
+    )
 
 
 def call_llm_for_json(
@@ -115,10 +173,4 @@ def call_llm_for_json(
     if not isJson:
         return response_text
 
-    try:
-        return json.loads(response_text)
-    except json.JSONDecodeError as exc:
-        raise LLMCallError(
-            "Model response was not valid JSON. "
-            f"Raw response: {response_text[:500]}"
-        ) from exc
+    return _parse_json_response(response_text)

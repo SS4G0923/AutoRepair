@@ -21,11 +21,23 @@ export interface ModelOption {
   label: string;
 }
 
+export interface ToolEventEntry {
+  id: string;
+  tool_name: string;
+  status: "started" | "completed";
+  round?: number;
+  arguments?: string;
+  output_preview?: string;
+  output_truncated?: boolean;
+  at: string;
+}
+
 export interface StageState {
   status: "idle" | "started" | "explaining" | "completed";
   explain: string;
   report: string;
   diff: string;
+  toolEvents: ToolEventEntry[];
 }
 
 export interface EventEntry {

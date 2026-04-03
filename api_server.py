@@ -221,10 +221,10 @@ def _chat_history_title(messages: list[dict[str, str]]) -> str:
 
 def _empty_stage_map() -> dict[str, dict[str, Any]]:
     return {
-        "run": {"status": "idle", "explain": "", "report": "", "diff": ""},
-        "inspect": {"status": "idle", "explain": "", "report": "", "diff": ""},
-        "plan": {"status": "idle", "explain": "", "report": "", "diff": ""},
-        "code": {"status": "idle", "explain": "", "report": "", "diff": ""},
+        "run": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "inspect": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "plan": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "code": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
     }
 
 
@@ -489,6 +489,20 @@ def repair_stream() -> Response:
                 captured["stages"][stage]["status"] = "explaining"
         elif event == "code_diff_chunk":
             captured["stages"]["code"]["diff"] += str(outgoing.get("chunk", ""))
+        elif event == "tool_event":
+            stage = str(outgoing.get("stage", ""))
+            if stage in captured["stages"]:
+                captured["stages"][stage]["toolEvents"].append(
+                    {
+                        "tool_name": str(outgoing.get("tool_name", "tool")),
+                        "status": str(outgoing.get("status", "started")),
+                        "round": outgoing.get("round"),
+                        "arguments": outgoing.get("arguments"),
+                        "output_preview": outgoing.get("output_preview"),
+                        "output_truncated": bool(outgoing.get("output_truncated", False)),
+                        "at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                    }
+                )
         elif event == "error":
             captured["error_message"] = str(outgoing.get("message", ""))
             saved = save_history(

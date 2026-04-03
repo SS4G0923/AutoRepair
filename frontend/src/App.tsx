@@ -19,15 +19,16 @@ import type {
   StageName,
   StageState,
   ThemeMode,
+  ToolEventEntry,
   UiLocale,
   WorkspaceMode,
 } from "./types";
 
 const createStageState = (): Record<StageName, StageState> => ({
-  run: { status: "idle", explain: "", report: "", diff: "" },
-  inspect: { status: "idle", explain: "", report: "", diff: "" },
-  plan: { status: "idle", explain: "", report: "", diff: "" },
-  code: { status: "idle", explain: "", report: "", diff: "" },
+  run: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
+  inspect: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
+  plan: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
+  code: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
 });
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "autorepair-sidebar-width";
@@ -46,6 +47,9 @@ function formatTimestamp() {
 function buildSummary(event: string, data: Record<string, unknown>) {
   if (event === "stage") {
     return `${String(data.stage)} · ${String(data.status)}`;
+  }
+  if (event === "tool_event") {
+    return `${String(data.stage)} · ${String(data.tool_name)} · ${String(data.status)}`;
   }
   if (event === "error") {
     return "error";
@@ -73,6 +77,47 @@ function parseSseBlock(block: string) {
     event,
     data: dataParts.length > 0 ? JSON.parse(dataParts.join("\n")) : {},
   };
+}
+
+function normalizeStageMap(
+  incoming?: Partial<Record<StageName, Partial<StageState>>>,
+): Record<StageName, StageState> {
+  const base = createStageState();
+  if (!incoming) {
+    return base;
+  }
+
+  for (const stage of Object.keys(base) as StageName[]) {
+    const next = incoming[stage];
+    if (!next) {
+      continue;
+    }
+    base[stage] = {
+      status: next.status ?? base[stage].status,
+      explain: next.explain ?? base[stage].explain,
+      report: next.report ?? base[stage].report,
+      diff: next.diff ?? base[stage].diff,
+      toolEvents: Array.isArray(next.toolEvents)
+        ? next.toolEvents.map((item, index) => ({
+            id:
+              typeof item.id === "string" && item.id
+                ? item.id
+                : `history-tool-${stage}-${index}`,
+            tool_name:
+              typeof item.tool_name === "string" && item.tool_name ? item.tool_name : "tool",
+            status: item.status === "completed" ? "completed" : "started",
+            round: typeof item.round === "number" ? item.round : undefined,
+            arguments: typeof item.arguments === "string" ? item.arguments : undefined,
+            output_preview:
+              typeof item.output_preview === "string" ? item.output_preview : undefined,
+            output_truncated: Boolean(item.output_truncated ?? false),
+            at: typeof item.at === "string" ? item.at : "",
+          }))
+        : [],
+    };
+  }
+
+  return base;
 }
 
 function applyUnifiedDiffToText(originalText: string, diffText: string) {
@@ -691,6 +736,32 @@ function App() {
       return;
     }
 
+    if (eventName === "tool_event") {
+      const stage = data.stage as StageName;
+      if (!stage || !["run", "inspect", "plan", "code"].includes(stage)) {
+        return;
+      }
+      const toolEvent: ToolEventEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        tool_name: String(data.tool_name ?? "tool"),
+        status: data.status === "completed" ? "completed" : "started",
+        round: typeof data.round === "number" ? data.round : undefined,
+        arguments: typeof data.arguments === "string" ? data.arguments : undefined,
+        output_preview:
+          typeof data.output_preview === "string" ? data.output_preview : undefined,
+        output_truncated: Boolean(data.output_truncated ?? false),
+        at: formatTimestamp(),
+      };
+      setStages((current) => ({
+        ...current,
+        [stage]: {
+          ...current[stage],
+          toolEvents: [...current[stage].toolEvents, toolEvent],
+        },
+      }));
+      return;
+    }
+
     if (eventName === "error") {
       setErrorMessage(String(data.message ?? ""));
       if (typeof data.history_id === "number") {
@@ -883,7 +954,7 @@ function App() {
         setModel(snapshot.model);
       }
       setRunResult(snapshot.run_result ?? null);
-      setStages(snapshot.stages ?? createStageState());
+      setStages(normalizeStageMap(snapshot.stages));
       setEvents(snapshot.events ?? []);
       setFinalDiff(snapshot.final_diff ?? "");
       setFinalMessage(
