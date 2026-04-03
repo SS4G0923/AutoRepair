@@ -1,3 +1,6 @@
 .idea
 tmp
 .venv
+frontend/.npm-cache
+frontend/dist
+frontend/node_modules
