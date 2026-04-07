@@ -274,3 +274,5 @@ export const copy = {
     stageDone: "该阶段已完成。",
   },
 } as const;
+
+export type AppCopy = (typeof copy)[keyof typeof copy];
