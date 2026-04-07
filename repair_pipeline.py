@@ -1,22 +1,30 @@
 from __future__ import annotations
 
 import ast
+import difflib
 import json
+import re
 from dataclasses import dataclass
-from pathlib import PurePath
 from typing import Any, Callable
 
 from inspector.inspector_prompt import build_planner_prompt
 from llm.agent_tools import RepairToolContext, build_repair_tools
 from llm import call_llm_for_json
-from sandbox import build_runtime_inspection_report, run_python_code_safely
+from project_workspace import (
+    ProjectFileInput,
+    build_project_runtime_inspection_report,
+    materialize_patched_workspace,
+    normalize_project_path,
+    prepare_project_workspace,
+)
+from sandbox import run_python_project_safely
 
 DEFAULT_MODEL = "qwen3.5-flash"
 MAX_CODE_CHARS = 100_000
 MAX_TIMEOUT_SEC = 30
 
 INSPECTOR_JSON_SYSTEM_PROMPT = """You are an expert bug inspection agent.
-You will receive a structured local runtime report for a single uploaded Python file.
+You will receive a structured local runtime report for an uploaded Python file or project.
 Return a compact JSON object that is directly useful for planning and fixing the bug.
 
 Requirements:
@@ -44,14 +52,18 @@ PLAN_EXPLAIN_SYSTEM_PROMPT = """你是一个优秀的代码 Bug 修复计划师�
 直接输出正文，不要添加开场白和结束语。"""
 
 CODE_SYSTEM_PROMPT = """You are a senior Python repair agent.
-You will be given a failing Python file, its runtime evidence, and a repair plan.
-Return ONLY a unified git diff for the original file.
+You will be given a failing Python file or project, its runtime evidence, and a repair plan.
+Return ONLY a unified git diff for the original project.
 
 Rules:
-- Modify only the uploaded file.
+- Modify only files inside the uploaded project.
 - Keep the change minimal and correctness-focused.
+- The final response must be a patch, never a rewritten full file.
+- The final response must be a valid unified git diff that can touch one or multiple files.
+- Every modified file must include `--- a/<path>`, `+++ b/<path>`, and at least one `@@` hunk.
 - Do not wrap the diff in Markdown fences.
-- Do not add explanations before or after the diff.
+- Do not add explanations, comments, JSON, or prose before or after the diff.
+- If you drafted code mentally, convert it into a unified diff before responding.
 - Use the available function tools to inspect exact source windows before you finalize the diff.
 """
 
@@ -61,7 +73,7 @@ CODE_EXPLAIN_SYSTEM_PROMPT = """你是一个优秀的代码修复工程师。
 直接输出正文，不要添加开场白和结束语。"""
 
 VERIFY_JSON_SYSTEM_PROMPT = """You are a Python repair verification agent.
-You will receive the original failure evidence, the repair plan, the proposed git diff, and the patched Python file.
+You will receive the original failure evidence, the repair plan, the proposed git diff, and the patched Python project.
 Return a compact JSON object describing a small self-contained verification block.
 
 Return JSON with this shape:
@@ -98,33 +110,50 @@ EventEmitter = Callable[[str, dict[str, Any]], None]
 
 @dataclass(frozen=True)
 class RepairRequest:
-    code: str
-    filename: str = "main.py"
+    code: str | None = None
+    filename: str | None = "main.py"
     language: str = "python"
     timeout_sec: int = 5
     model: str = DEFAULT_MODEL
+    project_files: tuple[ProjectFileInput, ...] = ()
+    project_zip_base64: str | None = None
+    github_repo_url: str | None = None
+    github_ref: str | None = None
+    project_subdir: str | None = None
+
+    @property
+    def source_type(self) -> str:
+        if self.github_repo_url:
+            return "github"
+        if self.project_zip_base64:
+            return "zip"
+        if self.project_files:
+            return "project_files"
+        return "single_file"
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "RepairRequest":
         code = payload.get("code")
-        if not isinstance(code, str) or not code.strip():
-            raise ValueError("`code` must be a non-empty string.")
-        if len(code) > MAX_CODE_CHARS:
-            raise ValueError(f"`code` must be at most {MAX_CODE_CHARS} characters.")
+        normalized_code: str | None = None
+        if code is not None:
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError("`code` must be a non-empty string when provided.")
+            if len(code) > MAX_CODE_CHARS:
+                raise ValueError(f"`code` must be at most {MAX_CODE_CHARS} characters.")
+            normalized_code = code
 
         language = payload.get("language", "python")
         if language != "python":
             raise ValueError("Only `python` is supported by the secure local runner.")
 
-        raw_filename = payload.get("filename", "main.py")
-        if not isinstance(raw_filename, str) or not raw_filename.strip():
-            raise ValueError("`filename` must be a non-empty string.")
-        filename = raw_filename.strip()
-        pure_path = PurePath(filename)
-        if pure_path.is_absolute() or ".." in pure_path.parts or len(pure_path.parts) != 1:
-            raise ValueError("`filename` must be a simple relative file name.")
-        if not filename.endswith(".py"):
-            raise ValueError("`filename` must end with `.py`.")
+        raw_filename = payload.get("filename")
+        filename: str | None = None
+        if raw_filename is not None:
+            if not isinstance(raw_filename, str) or not raw_filename.strip():
+                raise ValueError("`filename` must be a non-empty string when provided.")
+            filename = normalize_project_path(raw_filename, require_python=True)
+        elif normalized_code is not None:
+            filename = "main.py"
 
         timeout_sec = payload.get("timeout_sec", 5)
         if not isinstance(timeout_sec, int):
@@ -136,12 +165,75 @@ class RepairRequest:
         if not isinstance(model, str) or not model.strip():
             raise ValueError("`model` must be a non-empty string.")
 
+        raw_project_files = payload.get("project_files")
+        project_files: list[ProjectFileInput] = []
+        if raw_project_files is not None:
+            if not isinstance(raw_project_files, list) or not raw_project_files:
+                raise ValueError("`project_files` must be a non-empty array when provided.")
+            for index, item in enumerate(raw_project_files):
+                if not isinstance(item, dict):
+                    raise ValueError(f"`project_files[{index}]` must be an object.")
+                raw_path = item.get("path")
+                content = item.get("content")
+                if not isinstance(raw_path, str) or not raw_path.strip():
+                    raise ValueError(f"`project_files[{index}].path` must be a non-empty string.")
+                if not isinstance(content, str):
+                    raise ValueError(f"`project_files[{index}].content` must be a string.")
+                project_files.append(
+                    ProjectFileInput(
+                        path=normalize_project_path(raw_path),
+                        content=content,
+                    )
+                )
+
+        project_zip_base64 = payload.get("project_zip_base64")
+        if project_zip_base64 is not None and (
+            not isinstance(project_zip_base64, str) or not project_zip_base64.strip()
+        ):
+            raise ValueError("`project_zip_base64` must be a non-empty base64 string when provided.")
+
+        github_repo_url = payload.get("github_repo_url")
+        if github_repo_url is not None and (
+            not isinstance(github_repo_url, str) or not github_repo_url.strip()
+        ):
+            raise ValueError("`github_repo_url` must be a non-empty string when provided.")
+
+        github_ref = payload.get("github_ref")
+        if github_ref is not None and not isinstance(github_ref, str):
+            raise ValueError("`github_ref` must be a string when provided.")
+
+        project_subdir = payload.get("project_subdir")
+        if project_subdir is not None:
+            if not isinstance(project_subdir, str) or not project_subdir.strip():
+                raise ValueError("`project_subdir` must be a non-empty string when provided.")
+            project_subdir = normalize_project_path(project_subdir)
+
+        source_count = sum(
+            1
+            for present in (
+                normalized_code is not None,
+                bool(project_files),
+                bool(project_zip_base64),
+                bool(github_repo_url),
+            )
+            if present
+        )
+        if source_count != 1:
+            raise ValueError(
+                "Exactly one of `code`, `project_files`, `project_zip_base64`, or `github_repo_url` must be provided."
+            )
+
         return cls(
-            code=code,
+            code=normalized_code,
             filename=filename,
             language=language,
             timeout_sec=timeout_sec,
             model=model.strip(),
+            project_files=tuple(project_files),
+            project_zip_base64=project_zip_base64.strip() if isinstance(project_zip_base64, str) else None,
+            github_repo_url=github_repo_url.strip() if isinstance(github_repo_url, str) else None,
+            github_ref=github_ref.strip() if isinstance(github_ref, str) and github_ref.strip() else None,
+            project_subdir=project_subdir,
         )
 
 
@@ -155,6 +247,231 @@ def _normalize_diff(diff_text: str) -> str:
             lines = lines[:-1]
         cleaned = "\n".join(lines).strip()
     return cleaned
+
+
+def _extract_first_fenced_block(text: str) -> tuple[str, str] | None:
+    match = re.search(r"```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```", text)
+    if not match:
+        return None
+    return match.group(1).strip().lower(), match.group(2).strip()
+
+
+def _looks_like_unified_diff(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    has_headers = (
+        "diff --git " in stripped
+        or ("--- " in stripped and "+++ " in stripped)
+    )
+    has_hunk = "@@ " in stripped or "\n@@" in stripped
+    return has_headers and has_hunk or has_hunk
+
+
+def _extract_python_code_candidate(text: str) -> str | None:
+    fenced = _extract_first_fenced_block(text)
+    if fenced is not None:
+        label, body = fenced
+        if label in {"diff", "patch"}:
+            return None
+        if body:
+            return body
+
+    stripped = text.strip()
+    if not stripped or _looks_like_unified_diff(stripped):
+        return None
+    try:
+        ast.parse(stripped)
+    except SyntaxError:
+        return None
+    return stripped
+
+
+def _render_unified_diff(original_text: str, patched_text: str, filename: str) -> str:
+    original_lines = original_text.splitlines()
+    patched_lines = patched_text.splitlines()
+    diff_lines = list(
+        difflib.unified_diff(
+            original_lines,
+            patched_lines,
+            fromfile=f"a/{filename}",
+            tofile=f"b/{filename}",
+            lineterm="",
+        )
+    )
+    if not diff_lines:
+        return ""
+    return "\n".join([f"diff --git a/{filename} b/{filename}", *diff_lines]).strip()
+
+
+def _normalize_patch_path(raw_path: str) -> str | None:
+    value = raw_path.strip()
+    if value == "/dev/null":
+        return None
+    if value.startswith("a/") or value.startswith("b/"):
+        return value[2:]
+    return value
+
+
+def _parse_unified_diff_files(diff_text: str) -> list[dict[str, Any]]:
+    lines = _normalize_diff(diff_text).splitlines()
+    patches: list[dict[str, Any]] = []
+    index = 0
+
+    while index < len(lines):
+        if lines[index].startswith("diff --git "):
+            index += 1
+            while index < len(lines) and not lines[index].startswith("--- "):
+                index += 1
+        elif not lines[index].startswith("--- "):
+            index += 1
+            continue
+
+        if index >= len(lines) or not lines[index].startswith("--- "):
+            break
+        old_path = _normalize_patch_path(lines[index][4:])
+        index += 1
+        if index >= len(lines) or not lines[index].startswith("+++ "):
+            raise RuntimeError("Unified diff is missing a `+++` header.")
+        new_path = _normalize_patch_path(lines[index][4:])
+        index += 1
+
+        body_lines: list[str] = []
+        while index < len(lines) and not lines[index].startswith("diff --git ") and not lines[index].startswith("--- "):
+            body_lines.append(lines[index])
+            index += 1
+        if not any(line.startswith("@@") for line in body_lines):
+            raise RuntimeError("Unified diff file section did not contain any hunks.")
+
+        patches.append(
+            {
+                "old_path": old_path,
+                "new_path": new_path,
+                "body_lines": body_lines,
+            }
+        )
+
+    return patches
+
+
+def _render_project_diff(
+    original_files: dict[str, str],
+    patched_files: dict[str, str],
+) -> str:
+    diff_blocks: list[str] = []
+    changed_paths = sorted(set(original_files.keys()) | set(patched_files.keys()))
+    for path in changed_paths:
+        original_text = original_files.get(path)
+        patched_text = patched_files.get(path)
+        if original_text == patched_text:
+            continue
+
+        fromfile = f"a/{path}" if original_text is not None else "/dev/null"
+        tofile = f"b/{path}" if patched_text is not None else "/dev/null"
+        diff_lines = list(
+            difflib.unified_diff(
+                [] if original_text is None else original_text.splitlines(),
+                [] if patched_text is None else patched_text.splitlines(),
+                fromfile=fromfile,
+                tofile=tofile,
+                lineterm="",
+            )
+        )
+        if diff_lines:
+            diff_blocks.extend([f"diff --git a/{path} b/{path}", *diff_lines])
+    return "\n".join(diff_blocks).strip()
+
+
+def _apply_unified_diff_to_project(
+    original_files: dict[str, str],
+    diff_text: str,
+    *,
+    default_path: str | None = None,
+) -> dict[str, str]:
+    normalized = _normalize_diff(diff_text)
+    if default_path is not None and "@@" in normalized and "--- " not in normalized and "diff --git " not in normalized:
+        updated = dict(original_files)
+        updated[default_path] = _apply_unified_diff_to_text(original_files.get(default_path, ""), normalized)
+        return updated
+
+    patches = _parse_unified_diff_files(normalized)
+    if not patches:
+        raise RuntimeError("Unified diff did not contain any file sections.")
+
+    updated_files = dict(original_files)
+    for patch in patches:
+        old_path = patch["old_path"]
+        new_path = patch["new_path"]
+        if old_path is None and new_path is None:
+            raise RuntimeError("Encountered a patch with neither old nor new path.")
+
+        original_text = updated_files.get(old_path, "") if old_path is not None else ""
+        patch_text = "\n".join(
+            [
+                f"--- {'/dev/null' if old_path is None else f'a/{old_path}'}",
+                f"+++ {'/dev/null' if new_path is None else f'b/{new_path}'}",
+                *patch["body_lines"],
+            ]
+        )
+        patched_text = _apply_unified_diff_to_text(original_text, patch_text)
+
+        if old_path is not None and new_path is not None and old_path != new_path and old_path in updated_files:
+            del updated_files[old_path]
+
+        if new_path is None:
+            if old_path is not None:
+                updated_files.pop(old_path, None)
+        else:
+            updated_files[new_path] = patched_text
+
+    return updated_files
+
+
+def _coerce_model_output_to_diff(
+    raw_output: str,
+    *,
+    original_files: dict[str, str],
+    entrypoint: str,
+) -> str:
+    cleaned = _normalize_diff(raw_output)
+    if not cleaned:
+        return ""
+
+    diff_candidate = cleaned
+    fenced = _extract_first_fenced_block(raw_output)
+    if fenced is not None:
+        label, body = fenced
+        if label in {"diff", "patch"} and body:
+            diff_candidate = body
+
+    if _looks_like_unified_diff(diff_candidate):
+        patched_files = _apply_unified_diff_to_project(
+            original_files,
+            diff_candidate,
+            default_path=entrypoint,
+        )
+        canonical_diff = _render_project_diff(original_files, patched_files)
+        if canonical_diff:
+            return canonical_diff
+
+    python_candidate = _extract_python_code_candidate(raw_output)
+    if python_candidate is not None and len(original_files) == 1:
+        only_path = next(iter(original_files.keys()))
+        canonical_diff = _render_unified_diff(original_files[only_path], python_candidate, only_path)
+        if canonical_diff:
+            return canonical_diff
+
+    if _looks_like_unified_diff(cleaned):
+        patched_files = _apply_unified_diff_to_project(
+            original_files,
+            cleaned,
+            default_path=entrypoint,
+        )
+        canonical_diff = _render_project_diff(original_files, patched_files)
+        if canonical_diff:
+            return canonical_diff
+
+    raise RuntimeError("Repair model did not return a valid git diff or a full replacement file.")
 
 
 def _apply_unified_diff_to_text(original_text: str, diff_text: str) -> str:
@@ -453,240 +770,311 @@ def _build_tool_event_handler(emit: EventEmitter, stage: str) -> Callable[[str, 
 
 
 def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
-    _emit_stage(emit, "run", "started", message="Running uploaded code in an isolated local process.")
-    execution = run_python_code_safely(
-        request.code,
+    with prepare_project_workspace(
+        code=request.code,
         filename=request.filename,
-        timeout_sec=request.timeout_sec,
-    )
-    emit(
-        "run_result",
-        {
-            "execution": execution.to_dict(),
-            "stdout": execution.stdout,
-            "stderr": execution.stderr,
-        },
-    )
+        project_files=request.project_files,
+        project_zip_base64=request.project_zip_base64,
+        github_repo_url=request.github_repo_url,
+        github_ref=request.github_ref,
+        project_subdir=request.project_subdir,
+    ) as workspace:
+        _emit_stage(
+            emit,
+            "run",
+            "started",
+            message="Running uploaded Python project in an isolated local process.",
+            entrypoint=workspace.entrypoint,
+            source_type=workspace.source_type,
+        )
+        execution = run_python_project_safely(
+            workspace.root_dir,
+            filename=workspace.entrypoint,
+            timeout_sec=request.timeout_sec,
+        )
+        emit(
+            "run_result",
+            {
+                "execution": execution.to_dict(),
+                "stdout": execution.stdout,
+                "stderr": execution.stderr,
+                "entrypoint": workspace.entrypoint,
+                "source_type": workspace.source_type,
+                "file_count": len(workspace.file_map),
+            },
+        )
 
-    if execution.ok:
-        _emit_stage(emit, "run", "completed", message="No runtime error detected.")
+        if execution.ok:
+            _emit_stage(emit, "run", "completed", message="No runtime error detected.")
+            emit(
+                "result",
+                {
+                    "status": "clean",
+                    "message": "No error detected.",
+                    "filename": workspace.entrypoint,
+                },
+            )
+            return
+
+        runtime_report = build_project_runtime_inspection_report(workspace, execution)
+        stage_tools = build_repair_tools(
+            RepairToolContext(
+                entrypoint=workspace.entrypoint,
+                file_map=workspace.file_map,
+                runtime_report=runtime_report,
+                dependency_graph=workspace.dependency_graph,
+                reverse_dependency_graph=workspace.reverse_dependency_graph,
+            )
+        )
+
+        _emit_stage(emit, "inspect", "started")
+        inspector_report = call_llm_for_json(
+            prompt=json.dumps(runtime_report, ensure_ascii=False, indent=2),
+            system_prompt=INSPECTOR_JSON_SYSTEM_PROMPT,
+            model=request.model,
+            isJson=True,
+            tools=stage_tools,
+            tool_event_handler=_build_tool_event_handler(emit, "inspect"),
+        )
+        emit("inspect_report", {"stage": "inspect", "report": inspector_report})
+        _stream_explain(
+            stage="inspect",
+            prompt=json.dumps(
+                {
+                    "runtime_report": runtime_report,
+                    "inspector_report": inspector_report,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            system_prompt=INSPECT_EXPLAIN_SYSTEM_PROMPT,
+            model=request.model,
+            emit=emit,
+        )
+        _emit_stage(emit, "inspect", "completed")
+
+        _emit_stage(emit, "plan", "started")
+        planner_prompt = build_planner_prompt(inspector_report)
+        planner_report = call_llm_for_json(
+            prompt=planner_prompt,
+            system_prompt=PLANNER_SYSTEM_PROMPT,
+            model=request.model,
+            isJson=False,
+            tools=stage_tools,
+            tool_event_handler=_build_tool_event_handler(emit, "plan"),
+        )
+        emit("plan_report", {"stage": "plan", "report": planner_report})
+        _stream_explain(
+            stage="plan",
+            prompt=json.dumps(
+                {
+                    "inspector_report": inspector_report,
+                    "planner_report": planner_report,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            system_prompt=PLAN_EXPLAIN_SYSTEM_PROMPT,
+            model=request.model,
+            emit=emit,
+        )
+        _emit_stage(emit, "plan", "completed")
+
+        _emit_stage(emit, "code", "started")
+
+        def on_diff_chunk(chunk: str) -> None:
+            emit("code_diff_chunk", {"stage": "code", "chunk": chunk})
+
+        coder_prompt = json.dumps(
+            {
+                "entrypoint": workspace.entrypoint,
+                "project_summary": workspace.to_summary(),
+                "runtime_report": runtime_report,
+                "inspector_report": inspector_report,
+                "planner_report": planner_report,
+                "entrypoint_code": workspace.entrypoint_code,
+                "output_contract": {
+                    "format": "unified git diff",
+                    "project_scope": "uploaded project only",
+                    "required_structure": [
+                        "diff --git a/<path> b/<path>",
+                        "--- a/<path>",
+                        "+++ b/<path>",
+                        "@@ ... @@",
+                    ],
+                    "forbidden_outputs": [
+                        "full rewritten file",
+                        "markdown code fences",
+                        "explanatory prose",
+                        "json",
+                    ],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        raw_diff = call_llm_for_json(
+            prompt=coder_prompt,
+            system_prompt=CODE_SYSTEM_PROMPT,
+            model=request.model,
+            isJson=False,
+            stream=True,
+            stream_handler=on_diff_chunk,
+            tools=stage_tools,
+            tool_event_handler=_build_tool_event_handler(emit, "code"),
+        )
+        git_diff = _coerce_model_output_to_diff(
+            raw_diff,
+            original_files=workspace.file_map,
+            entrypoint=workspace.entrypoint,
+        )
+        if not git_diff:
+            raise RuntimeError("Repair model returned an empty diff.")
+
+        emit("code_report", {"stage": "code", "git_diff": git_diff})
+        _stream_explain(
+            stage="code",
+            prompt=json.dumps(
+                {
+                    "planner_report": planner_report,
+                    "git_diff": git_diff,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            system_prompt=CODE_EXPLAIN_SYSTEM_PROMPT,
+            model=request.model,
+            emit=emit,
+        )
+        _emit_stage(emit, "code", "completed")
+
+        _emit_stage(emit, "verify", "started")
+        patched_files = _apply_unified_diff_to_project(
+            workspace.file_map,
+            git_diff,
+            default_path=workspace.entrypoint,
+        )
+        verify_tools = build_repair_tools(
+            RepairToolContext(
+                entrypoint=workspace.entrypoint,
+                file_map=patched_files,
+                runtime_report=runtime_report,
+                dependency_graph=workspace.dependency_graph,
+                reverse_dependency_graph=workspace.reverse_dependency_graph,
+            )
+        )
+        verify_prompt = json.dumps(
+            {
+                "entrypoint": workspace.entrypoint,
+                "project_summary": workspace.to_summary(),
+                "runtime_report": runtime_report,
+                "inspector_report": inspector_report,
+                "planner_report": planner_report,
+                "git_diff": git_diff,
+                "patched_entrypoint_code": patched_files.get(workspace.entrypoint, ""),
+                "modified_files": sorted(
+                    path
+                    for path in set(workspace.file_map.keys()) | set(patched_files.keys())
+                    if workspace.file_map.get(path) != patched_files.get(path)
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        raw_verify_report = call_llm_for_json(
+            prompt=verify_prompt,
+            system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
+            model=request.model,
+            isJson=True,
+            tools=verify_tools,
+            tool_event_handler=_build_tool_event_handler(emit, "verify"),
+        )
+        verification_base_source, skipped_verification_nodes = _build_verification_base_source(
+            patched_files.get(workspace.entrypoint, ""),
+            workspace.entrypoint,
+        )
+        existing_symbol_names = _collect_defined_symbol_names(
+            verification_base_source,
+            workspace.entrypoint,
+        )
+        verify_report = _normalize_verification_report(
+            raw_verify_report,
+            existing_symbol_names=existing_symbol_names,
+            filename=workspace.entrypoint,
+        )
+
+        with materialize_patched_workspace(
+            workspace.root_dir,
+            patched_files,
+            set(workspace.file_map.keys()),
+        ) as patched_root:
+            patched_execution = run_python_project_safely(
+                patched_root,
+                filename=workspace.entrypoint,
+                timeout_sec=request.timeout_sec,
+            )
+
+        verification_script = _build_verification_script(
+            verification_base_source,
+            verify_report["verification_code"],
+        )
+        with materialize_patched_workspace(
+            workspace.root_dir,
+            patched_files,
+            set(workspace.file_map.keys()),
+        ) as verify_root:
+            verify_target = verify_root / workspace.entrypoint
+            verify_target.parent.mkdir(parents=True, exist_ok=True)
+            verify_target.write_text(verification_script, encoding="utf-8")
+            verify_execution = run_python_project_safely(
+                verify_root,
+                filename=workspace.entrypoint,
+                timeout_sec=request.timeout_sec,
+            )
+
+        verify_passed = patched_execution.ok and verify_execution.ok
+        verify_payload = {
+            **verify_report,
+            "patched_execution": patched_execution.to_dict(),
+            "verification_execution": verify_execution.to_dict(),
+            "verification_stdout": verify_execution.stdout,
+            "verification_stderr": verify_execution.stderr,
+            "verification_base_mode": "definition_only_entrypoint_context",
+            "skipped_top_level_nodes": skipped_verification_nodes,
+            "modified_files": sorted(
+                path
+                for path in set(workspace.file_map.keys()) | set(patched_files.keys())
+                if workspace.file_map.get(path) != patched_files.get(path)
+            ),
+            "passed": verify_passed,
+        }
+        emit("verify_report", {"stage": "verify", "report": verify_payload})
+        _stream_explain(
+            stage="verify",
+            prompt=json.dumps(
+                {
+                    "verification_report": verify_payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            system_prompt=VERIFY_EXPLAIN_SYSTEM_PROMPT,
+            model=request.model,
+            emit=emit,
+        )
+        _emit_stage(emit, "verify", "completed")
+
         emit(
             "result",
             {
-                "status": "clean",
-                "message": "No error detected.",
-                "filename": request.filename,
-            },
-        )
-        return
-
-    runtime_report = build_runtime_inspection_report(
-        code=request.code,
-        filename=request.filename,
-        execution=execution,
-    )
-    stage_tools = build_repair_tools(
-        RepairToolContext(
-            filename=request.filename,
-            code=request.code,
-            runtime_report=runtime_report,
-        )
-    )
-
-    _emit_stage(emit, "inspect", "started")
-    inspector_report = call_llm_for_json(
-        prompt=json.dumps(runtime_report, ensure_ascii=False, indent=2),
-        system_prompt=INSPECTOR_JSON_SYSTEM_PROMPT,
-        model=request.model,
-        isJson=True,
-        tools=stage_tools,
-        tool_event_handler=_build_tool_event_handler(emit, "inspect"),
-    )
-    emit("inspect_report", {"stage": "inspect", "report": inspector_report})
-    _stream_explain(
-        stage="inspect",
-        prompt=json.dumps(
-            {
-                "runtime_report": runtime_report,
-                "inspector_report": inspector_report,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        system_prompt=INSPECT_EXPLAIN_SYSTEM_PROMPT,
-        model=request.model,
-        emit=emit,
-    )
-    _emit_stage(emit, "inspect", "completed")
-
-    _emit_stage(emit, "plan", "started")
-    planner_prompt = build_planner_prompt(inspector_report)
-    planner_report = call_llm_for_json(
-        prompt=planner_prompt,
-        system_prompt=PLANNER_SYSTEM_PROMPT,
-        model=request.model,
-        isJson=False,
-        tools=stage_tools,
-        tool_event_handler=_build_tool_event_handler(emit, "plan"),
-    )
-    emit("plan_report", {"stage": "plan", "report": planner_report})
-    _stream_explain(
-        stage="plan",
-        prompt=json.dumps(
-            {
-                "inspector_report": inspector_report,
-                "planner_report": planner_report,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        system_prompt=PLAN_EXPLAIN_SYSTEM_PROMPT,
-        model=request.model,
-        emit=emit,
-    )
-    _emit_stage(emit, "plan", "completed")
-
-    _emit_stage(emit, "code", "started")
-
-    def on_diff_chunk(chunk: str) -> None:
-        emit("code_diff_chunk", {"stage": "code", "chunk": chunk})
-
-    coder_prompt = json.dumps(
-        {
-            "filename": request.filename,
-            "runtime_report": runtime_report,
-            "inspector_report": inspector_report,
-            "planner_report": planner_report,
-            "original_code": request.code,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
-    raw_diff = call_llm_for_json(
-        prompt=coder_prompt,
-        system_prompt=CODE_SYSTEM_PROMPT,
-        model=request.model,
-        isJson=False,
-        stream=True,
-        stream_handler=on_diff_chunk,
-        tools=stage_tools,
-        tool_event_handler=_build_tool_event_handler(emit, "code"),
-    )
-    git_diff = _normalize_diff(raw_diff)
-    if not git_diff:
-        raise RuntimeError("Repair model returned an empty diff.")
-
-    emit("code_report", {"stage": "code", "git_diff": git_diff})
-    _stream_explain(
-        stage="code",
-        prompt=json.dumps(
-            {
-                "planner_report": planner_report,
+                "status": "verified" if verify_passed else "verify_failed",
+                "filename": workspace.entrypoint,
                 "git_diff": git_diff,
+                "verification_passed": verify_passed,
+                "message": (
+                    "Verification passed. Review the patch and decide whether to accept it."
+                    if verify_passed
+                    else "Verification failed. The generated patch did not satisfy the assertion checks."
+                ),
             },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        system_prompt=CODE_EXPLAIN_SYSTEM_PROMPT,
-        model=request.model,
-        emit=emit,
-    )
-    _emit_stage(emit, "code", "completed")
-
-    _emit_stage(emit, "verify", "started")
-    patched_code = _apply_unified_diff_to_text(request.code, git_diff)
-    verify_tools = build_repair_tools(
-        RepairToolContext(
-            filename=request.filename,
-            code=patched_code,
-            runtime_report=runtime_report,
         )
-    )
-    verify_prompt = json.dumps(
-        {
-            "filename": request.filename,
-            "runtime_report": runtime_report,
-            "inspector_report": inspector_report,
-            "planner_report": planner_report,
-            "git_diff": git_diff,
-            "patched_code": patched_code,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
-    raw_verify_report = call_llm_for_json(
-        prompt=verify_prompt,
-        system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
-        model=request.model,
-        isJson=True,
-        tools=verify_tools,
-        tool_event_handler=_build_tool_event_handler(emit, "verify"),
-    )
-    verification_base_source, skipped_verification_nodes = _build_verification_base_source(
-        patched_code,
-        request.filename,
-    )
-    existing_symbol_names = _collect_defined_symbol_names(
-        verification_base_source,
-        request.filename,
-    )
-    verify_report = _normalize_verification_report(
-        raw_verify_report,
-        existing_symbol_names=existing_symbol_names,
-        filename=request.filename,
-    )
-    patched_execution = run_python_code_safely(
-        verification_base_source,
-        filename=request.filename,
-        timeout_sec=request.timeout_sec,
-    )
-    verification_script = _build_verification_script(
-        verification_base_source,
-        verify_report["verification_code"],
-    )
-    verify_execution = run_python_code_safely(
-        verification_script,
-        filename=request.filename,
-        timeout_sec=request.timeout_sec,
-    )
-    verify_passed = patched_execution.ok and verify_execution.ok
-    verify_payload = {
-        **verify_report,
-        "patched_execution": patched_execution.to_dict(),
-        "verification_execution": verify_execution.to_dict(),
-        "verification_stdout": verify_execution.stdout,
-        "verification_stderr": verify_execution.stderr,
-        "verification_base_mode": "definition_only",
-        "skipped_top_level_nodes": skipped_verification_nodes,
-        "passed": verify_passed,
-    }
-    emit("verify_report", {"stage": "verify", "report": verify_payload})
-    _stream_explain(
-        stage="verify",
-        prompt=json.dumps(
-            {
-                "verification_report": verify_payload,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        system_prompt=VERIFY_EXPLAIN_SYSTEM_PROMPT,
-        model=request.model,
-        emit=emit,
-    )
-    _emit_stage(emit, "verify", "completed")
-
-    emit(
-        "result",
-        {
-            "status": "verified" if verify_passed else "verify_failed",
-            "filename": request.filename,
-            "git_diff": git_diff,
-            "verification_passed": verify_passed,
-            "message": (
-                "Verification passed. Review the patch and decide whether to accept it."
-                if verify_passed
-                else "Verification failed. The generated patch did not satisfy the assertion checks."
-            ),
-        },
-    )

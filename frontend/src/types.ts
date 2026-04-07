@@ -5,6 +5,7 @@ export type StageName = "run" | "inspect" | "plan" | "code" | "verify";
 export type AuthMode = "login" | "register";
 export type OAuthProvider = "github" | "google";
 export type WorkspaceMode = "agent" | "chat";
+export type AgentSourceType = "single_file" | "zip" | "github";
 
 export type CodeLanguage = "python" | "javascript" | "typescript" | "java" | "go";
 export type ModelOptionValue = string;
@@ -51,6 +52,9 @@ export interface EventEntry {
 export interface RunResult {
   stdout: string;
   stderr: string;
+  entrypoint?: string;
+  source_type?: AgentSourceType;
+  file_count?: number;
   execution?: {
     returncode: number;
     duration_sec: number;
@@ -90,6 +94,10 @@ export interface AgentHistorySnapshot {
   filename: string;
   language: CodeLanguage;
   model: string;
+  source_type?: AgentSourceType;
+  github_repo_url?: string;
+  github_ref?: string;
+  project_subdir?: string;
   run_result: RunResult | null;
   stages: Record<StageName, StageState>;
   events: EventEntry[];

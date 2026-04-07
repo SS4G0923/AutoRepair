@@ -4,6 +4,7 @@ import { CodeEditor } from "./components/CodeEditor";
 import { StageCard } from "./components/StageCard";
 import { codeTemplates, copy, languageOptions, modelOptions, stageOrder } from "./i18n";
 import type {
+  AgentSourceType,
   AuthenticatedUser,
   AgentHistorySnapshot,
   ChatMessage,
@@ -42,6 +43,23 @@ function formatTimestamp() {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+  });
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = typeof reader.result === "string" ? reader.result : "";
+      const commaIndex = raw.indexOf(",");
+      if (commaIndex === -1) {
+        reject(new Error("Failed to read ZIP archive."));
+        return;
+      }
+      resolve(raw.slice(commaIndex + 1));
+    };
+    reader.onerror = () => reject(new Error("Failed to read ZIP archive."));
+    reader.readAsDataURL(file);
   });
 }
 
@@ -285,9 +303,16 @@ function App() {
   const [deletingHistoryId, setDeletingHistoryId] = useState<number | null>(null);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [activeChatHistoryId, setActiveChatHistoryId] = useState<number | null>(null);
+  const [agentSourceType, setAgentSourceType] = useState<AgentSourceType>("single_file");
   const [language, setLanguage] = useState<CodeLanguage>("python");
   const [model, setModel] = useState<ModelOptionValue>("qwen3.5-plus");
   const [code, setCode] = useState(codeTemplates.python);
+  const [entrypointPath, setEntrypointPath] = useState("main.py");
+  const [projectSubdir, setProjectSubdir] = useState("");
+  const [githubRepoUrl, setGithubRepoUrl] = useState("");
+  const [githubRef, setGithubRef] = useState("");
+  const [zipFileName, setZipFileName] = useState("");
+  const [zipFileBase64, setZipFileBase64] = useState("");
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [stages, setStages] = useState<Record<StageName, StageState>>(createStageState);
@@ -321,7 +346,7 @@ function App() {
   const dict = copy[locale];
   const activeLanguage = languageOptions.find((item) => item.value === language) ?? languageOptions[0];
   const activeModel = modelOptions.find((item) => item.value === model) ?? modelOptions[0];
-  const pythonSupported = activeLanguage.supported;
+  const pythonSupported = agentSourceType === "single_file" ? activeLanguage.supported : true;
 
   async function fetchSession() {
     const response = await fetch(`${apiBaseUrl}/api/auth/session`, {
@@ -498,8 +523,11 @@ function App() {
   }, [sidebarResizing]);
 
   useEffect(() => {
+    if (agentSourceType !== "single_file") {
+      return;
+    }
     setCode(codeTemplates[language]);
-  }, [language]);
+  }, [agentSourceType, language]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -558,6 +586,60 @@ function App() {
     };
   }, [apiBaseUrl, dict.oauthFailed]);
 
+  async function handleZipSelected(file: File | null) {
+    if (!file) {
+      setZipFileName("");
+      setZipFileBase64("");
+      return;
+    }
+    const encoded = await fileToBase64(file);
+    setZipFileName(file.name);
+    setZipFileBase64(encoded);
+    setErrorMessage("");
+    setStatus("idle");
+  }
+
+  function buildRepairPayload() {
+    const normalizedEntrypoint = entrypointPath.trim();
+    const normalizedSubdir = projectSubdir.trim();
+
+    if (agentSourceType === "single_file") {
+      return {
+        code,
+        filename: normalizedEntrypoint || `snippet.${activeLanguage.extension}`,
+        language,
+        model,
+      };
+    }
+
+    if (agentSourceType === "zip") {
+      if (!zipFileBase64) {
+        throw new Error(dict.zipRequired);
+      }
+      return {
+        filename: normalizedEntrypoint || "main.py",
+        language: "python",
+        model,
+        project_zip_base64: zipFileBase64,
+        ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
+      };
+    }
+
+    const normalizedRepoUrl = githubRepoUrl.trim();
+    const normalizedRef = githubRef.trim();
+    if (!normalizedRepoUrl) {
+      throw new Error(dict.githubRepoRequired);
+    }
+    return {
+      filename: normalizedEntrypoint || "main.py",
+      language: "python",
+      model,
+      github_repo_url: normalizedRepoUrl,
+      ...(normalizedRef ? { github_ref: normalizedRef } : {}),
+      ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
+    };
+  }
+
   async function handleSend() {
     if (!pythonSupported) {
       setErrorMessage(dict.unsupported);
@@ -581,18 +663,14 @@ function App() {
     setDiffApplied(false);
 
     try {
+      const payload = buildRepairPayload();
       const response = await fetch(`${apiBaseUrl}/api/repair/stream`, {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          code,
-          filename: `snippet.${activeLanguage.extension}`,
-          language,
-          model,
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 
@@ -665,6 +743,12 @@ function App() {
       setRunResult({
         stdout: String(data.stdout ?? ""),
         stderr: String(data.stderr ?? ""),
+        entrypoint: typeof data.entrypoint === "string" ? data.entrypoint : undefined,
+        source_type:
+          data.source_type === "single_file" || data.source_type === "zip" || data.source_type === "github"
+            ? data.source_type
+            : undefined,
+        file_count: typeof data.file_count === "number" ? Number(data.file_count) : undefined,
         execution:
           typeof data.execution === "object" && data.execution
             ? {
@@ -928,6 +1012,10 @@ function App() {
   }
 
   function handleApplyDiff() {
+    if (agentSourceType !== "single_file") {
+      setDiffDecisionMessage(dict.applyProjectOnly);
+      return;
+    }
     try {
       const nextCode = applyUnifiedDiffToText(code, finalDiff);
       setCode(nextCode);
@@ -994,8 +1082,19 @@ function App() {
       setChatThinking(false);
       setChatStreamingText("");
       setChatError("");
+      setAgentSourceType(snapshot.source_type ?? "single_file");
+      setEntrypointPath(snapshot.filename ?? "main.py");
+      setProjectSubdir(snapshot.project_subdir ?? "");
+      setGithubRepoUrl(snapshot.github_repo_url ?? "");
+      setGithubRef(snapshot.github_ref ?? "");
+      setZipFileName("");
+      setZipFileBase64("");
       setLanguage(snapshot.language ?? "python");
-      setCode(snapshot.code ?? codeTemplates[snapshot.language ?? "python"]);
+      setCode(
+        snapshot.source_type === "single_file"
+          ? snapshot.code ?? codeTemplates[snapshot.language ?? "python"]
+          : codeTemplates.python,
+      );
       if (snapshot.model) {
         setModel(snapshot.model);
       }
@@ -1519,34 +1618,237 @@ function App() {
                   <div className="grid h-full min-h-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden pr-1">
                       <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
-                        <div className="shrink-0 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                          <div>
-                            <div className="text-xs uppercase tracking-[0.32em] text-slate-500 dark:text-white/40">{dict.editorTitle}</div>
-                            <div className="mt-2 text-sm text-slate-600 dark:text-white/65">{dict.editorHint}</div>
-                          </div>
-                          <div className="flex flex-wrap gap-3">
-                            <select
-                              value={language}
-                              onChange={(event) => setLanguage(event.target.value as CodeLanguage)}
-                              className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            >
-                              {languageOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                            <select
-                              value={model}
-                              onChange={(event) => setModel(event.target.value as ModelOptionValue)}
-                              className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            >
-                              {modelOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {dict.model}: {option.label}
-                                </option>
-                              ))}
-                            </select>
+                        <div className="shrink-0">
+                          <div className="flex flex-col gap-4">
+                            <div>
+                              <div className="text-xs uppercase tracking-[0.32em] text-slate-500 dark:text-white/40">
+                                {agentSourceType === "single_file" ? dict.editorTitle : dict.projectContextTitle}
+                              </div>
+                              <div className="mt-2 text-sm text-slate-600 dark:text-white/65">
+                                {agentSourceType === "single_file" ? dict.editorHint : dict.projectContextHint}
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                {dict.sourceType}
+                              </div>
+                              <div className="grid gap-2 md:grid-cols-3">
+                                {(
+                                  [
+                                    ["single_file", dict.sourceSingle, dict.sourceSingleHint],
+                                    ["zip", dict.sourceZip, dict.sourceZipHint],
+                                    ["github", dict.sourceGithub, dict.sourceGithubHint],
+                                  ] as const
+                                ).map(([value, label, hint]) => (
+                                  <button
+                                    key={value}
+                                    onClick={() => setAgentSourceType(value)}
+                                    className={`rounded-[18px] border px-4 py-3 text-left transition ${
+                                      agentSourceType === value
+                                        ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                                        : "border-black/10 bg-white/70 text-slate-700 hover:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+                                    }`}
+                                  >
+                                    <div className="font-medium">{label}</div>
+                                    <div
+                                      className={`mt-1 text-xs ${
+                                        agentSourceType === value
+                                          ? "text-white/70 dark:text-slate-950/70"
+                                          : "text-slate-500 dark:text-white/45"
+                                      }`}
+                                    >
+                                      {hint}
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {agentSourceType === "single_file" ? (
+                              <div className="grid gap-3 xl:grid-cols-3">
+                                <label className="block">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.sourceSingle}
+                                  </div>
+                                  <select
+                                    value={language}
+                                    onChange={(event) => setLanguage(event.target.value as CodeLanguage)}
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                  >
+                                    {languageOptions.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="block">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.model}
+                                  </div>
+                                  <select
+                                    value={model}
+                                    onChange={(event) => setModel(event.target.value as ModelOptionValue)}
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                  >
+                                    {modelOptions.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="block">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.entrypoint}
+                                  </div>
+                                  <input
+                                    value={entrypointPath}
+                                    onChange={(event) => setEntrypointPath(event.target.value)}
+                                    placeholder="main.py"
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                                  />
+                                </label>
+                              </div>
+                            ) : null}
+
+                            {agentSourceType === "zip" ? (
+                              <div className="space-y-3">
+                                <div className="grid gap-3 xl:grid-cols-3">
+                                  <label className="block">
+                                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                      {dict.model}
+                                    </div>
+                                    <select
+                                      value={model}
+                                      onChange={(event) => setModel(event.target.value as ModelOptionValue)}
+                                      className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                    >
+                                      {modelOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="block">
+                                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                      {dict.entrypoint}
+                                    </div>
+                                    <input
+                                      value={entrypointPath}
+                                      onChange={(event) => setEntrypointPath(event.target.value)}
+                                      placeholder="app/main.py"
+                                      className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                                    />
+                                  </label>
+                                  <label className="block">
+                                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                      {dict.projectSubdir}
+                                    </div>
+                                    <input
+                                      value={projectSubdir}
+                                      onChange={(event) => setProjectSubdir(event.target.value)}
+                                      placeholder="src"
+                                      className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                                    />
+                                  </label>
+                                </div>
+                                <div className="rounded-[22px] border border-dashed border-black/10 bg-black/[0.03] p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                                  <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-medium text-slate-900 dark:text-white">
+                                        {dict.zipUpload}
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-500 dark:text-white/45">
+                                        {zipFileName ? `${dict.zipSelected}: ${zipFileName}` : dict.sourceZipHint}
+                                      </div>
+                                    </div>
+                                    <label className="inline-flex cursor-pointer items-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85">
+                                      <span>{zipFileName ? dict.zipReplace : dict.zipChoose}</span>
+                                      <input
+                                        type="file"
+                                        accept=".zip,application/zip"
+                                        className="hidden"
+                                        onChange={(event) => {
+                                          const file = event.target.files?.[0] ?? null;
+                                          void handleZipSelected(file).catch((error: unknown) => {
+                                            setErrorMessage(error instanceof Error ? error.message : String(error));
+                                            setStatus("error");
+                                          });
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {agentSourceType === "github" ? (
+                              <div className="grid gap-3 xl:grid-cols-2">
+                                <label className="block xl:col-span-2">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.githubRepoUrl}
+                                  </div>
+                                  <input
+                                    value={githubRepoUrl}
+                                    onChange={(event) => setGithubRepoUrl(event.target.value)}
+                                    placeholder="https://github.com/owner/repo"
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.githubRef}
+                                  </div>
+                                  <input
+                                    value={githubRef}
+                                    onChange={(event) => setGithubRef(event.target.value)}
+                                    placeholder="main"
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.model}
+                                  </div>
+                                  <select
+                                    value={model}
+                                    onChange={(event) => setModel(event.target.value as ModelOptionValue)}
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                  >
+                                    {modelOptions.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="block">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.entrypoint}
+                                  </div>
+                                  <input
+                                    value={entrypointPath}
+                                    onChange={(event) => setEntrypointPath(event.target.value)}
+                                    placeholder="app/main.py"
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.projectSubdir}
+                                  </div>
+                                  <input
+                                    value={projectSubdir}
+                                    onChange={(event) => setProjectSubdir(event.target.value)}
+                                    placeholder="packages/api"
+                                    className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                                  />
+                                </label>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
 
@@ -1556,8 +1858,63 @@ function App() {
                           </div>
                         ) : null}
 
-                        <div className="mt-3 min-h-0 flex-1 flex flex-col">
-                          <CodeEditor value={code} onChange={setCode} placeholder={dict.placeholder} />
+                        <div className="mt-3 min-h-0 flex flex-1 flex-col">
+                          {agentSourceType === "single_file" ? (
+                            <CodeEditor value={code} onChange={setCode} placeholder={dict.placeholder} />
+                          ) : (
+                            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-black/5 bg-black/[0.03] p-5 dark:border-white/10 dark:bg-white/[0.03]">
+                              <div className="grid gap-4 lg:grid-cols-2">
+                                <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70">
+                                  <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.entrypoint}
+                                  </div>
+                                  <div className="mt-2 font-mono text-sm text-slate-800 dark:text-white">
+                                    {entrypointPath.trim() || "main.py"}
+                                  </div>
+                                  <div className="mt-2 text-xs text-slate-500 dark:text-white/45">
+                                    {dict.entrypointHint}
+                                  </div>
+                                </div>
+                                <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70">
+                                  <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {dict.projectSubdir}
+                                  </div>
+                                  <div className="mt-2 font-mono text-sm text-slate-800 dark:text-white">
+                                    {projectSubdir.trim() || "∅"}
+                                  </div>
+                                  <div className="mt-2 text-xs text-slate-500 dark:text-white/45">
+                                    {dict.projectSubdirHint}
+                                  </div>
+                                </div>
+                                <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
+                                  <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                    {agentSourceType === "zip" ? dict.zipUpload : dict.githubRepoUrl}
+                                  </div>
+                                  <div className="mt-2 whitespace-pre-wrap break-words font-mono text-sm text-slate-800 dark:text-white">
+                                    {agentSourceType === "zip"
+                                      ? zipFileName || dict.zipRequired
+                                      : githubRepoUrl.trim() || dict.githubRepoRequired}
+                                  </div>
+                                  <div className="mt-2 text-xs text-slate-500 dark:text-white/45">
+                                    {agentSourceType === "zip" ? dict.sourceZipHint : dict.githubRepoHint}
+                                  </div>
+                                </div>
+                                {agentSourceType === "github" ? (
+                                  <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
+                                    <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                                      {dict.githubRef}
+                                    </div>
+                                    <div className="mt-2 font-mono text-sm text-slate-800 dark:text-white">
+                                      {githubRef.trim() || "default"}
+                                    </div>
+                                    <div className="mt-2 text-xs text-slate-500 dark:text-white/45">
+                                      {dict.githubRefHint}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <div className="mt-3 shrink-0 flex flex-wrap items-center gap-2">
@@ -1597,11 +1954,15 @@ function App() {
                         <section className="rounded-[20px] border border-black/5 bg-white/75 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
                           <div className="flex items-center justify-between gap-4">
                             <div className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/80">{dict.runOutput}</div>
-                            {runResult?.execution ? (
-                              <div className="text-xs text-slate-500 dark:text-white/75">
-                                rc={runResult.execution.returncode} · {runResult.execution.duration_sec.toFixed(2)}s
-                              </div>
-                            ) : null}
+                            <div className="text-right text-xs text-slate-500 dark:text-white/75">
+                              {runResult?.entrypoint ? <div>{runResult.entrypoint}</div> : null}
+                              {runResult?.execution ? (
+                                <div>
+                                  rc={runResult.execution.returncode} · {runResult.execution.duration_sec.toFixed(2)}s
+                                  {typeof runResult.file_count === "number" ? ` · ${runResult.file_count} files` : ""}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                           {runResult ? (
                             <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -1637,7 +1998,7 @@ function App() {
                               <pre className="overflow-y-auto whitespace-pre-wrap break-words rounded-3xl bg-slate-950 p-5 font-mono text-xs leading-6 text-slate-100 [overflow-wrap:anywhere] dark:bg-ink-900">
                                 {finalDiff}
                               </pre>
-                              {verificationPassed ? (
+                              {verificationPassed && agentSourceType === "single_file" ? (
                                 <div className="mt-4 flex flex-wrap items-center gap-3">
                                   <div className="text-sm text-slate-600 dark:text-white/70">{dict.applyPrompt}</div>
                                   <button
@@ -1653,6 +2014,11 @@ function App() {
                                   >
                                     {dict.applyDecline}
                                   </button>
+                                </div>
+                              ) : null}
+                              {verificationPassed && agentSourceType !== "single_file" ? (
+                                <div className="mt-4 rounded-3xl border border-black/10 bg-black/[0.03] px-4 py-3 text-sm text-slate-700 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/75">
+                                  {dict.applyProjectOnly}
                                 </div>
                               ) : null}
                               {diffDecisionMessage ? (

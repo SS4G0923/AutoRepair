@@ -77,6 +77,33 @@ def _extract_traceback_frames(stderr: str, filename: str) -> list[dict[str, Any]
     return frames
 
 
+def _extract_project_traceback_frames(stderr: str, project_root: Path) -> list[dict[str, Any]]:
+    frames: list[dict[str, Any]] = []
+    project_root_resolved = project_root.resolve()
+    for raw_line in stderr.splitlines():
+        match = TRACEBACK_FRAME_RE.match(raw_line)
+        if not match:
+            continue
+        file_name = match.group("file")
+        file_path = Path(file_name)
+        try:
+            relative_path = file_path.resolve().relative_to(project_root_resolved).as_posix()
+        except Exception:
+            continue
+        if relative_path == "__autorepair_launcher__.py":
+            continue
+        frames.append(
+            {
+                "file": file_name,
+                "path": relative_path,
+                "line_number": int(match.group("line")),
+                "function": match.group("func").strip(),
+                "raw_line": raw_line.strip(),
+            }
+        )
+    return frames
+
+
 def _extract_exception(stderr: str) -> tuple[str | None, str | None]:
     for line in reversed(stderr.splitlines()):
         stripped = line.strip()
@@ -117,6 +144,111 @@ def _limit_resources(memory_limit_mb: int, cpu_time_sec: int, file_limit_bytes: 
             continue
 
 
+def _run_python_entrypoint_safely(
+    *,
+    work_dir: Path,
+    filename: str,
+    timeout_sec: int,
+    memory_limit_mb: int,
+    max_output_chars: int,
+) -> SandboxedExecutionResult:
+    start = time.time()
+    timed_out = False
+    truncated = False
+    stdout_path = work_dir / "stdout.txt"
+    stderr_path = work_dir / "stderr.txt"
+    command = ["python3", "-I", "-B", "-S", filename]
+    env = {
+        "HOME": str(work_dir),
+        "PATH": os.getenv("PATH", ""),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+    }
+
+    with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open(
+        "w", encoding="utf-8"
+    ) as stderr_file:
+        process = subprocess.Popen(
+            command,
+            cwd=work_dir,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            env=env,
+            text=True,
+            preexec_fn=lambda: _limit_resources(memory_limit_mb, timeout_sec, max_output_chars),
+        )
+        try:
+            returncode = process.wait(timeout=timeout_sec + 1)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            returncode = -signal.SIGKILL
+
+    stdout_text, stdout_truncated = _truncate_text(
+        stdout_path.read_text(encoding="utf-8", errors="replace"),
+        max_output_chars,
+    )
+    stderr_text, stderr_truncated = _truncate_text(
+        stderr_path.read_text(encoding="utf-8", errors="replace"),
+        max_output_chars,
+    )
+    truncated = stdout_truncated or stderr_truncated
+    end = time.time()
+    return SandboxedExecutionResult(
+        filename=filename,
+        command=command,
+        work_dir=str(work_dir),
+        returncode=returncode,
+        stdout=stdout_text,
+        stderr=stderr_text,
+        duration_sec=end - start,
+        timed_out=timed_out,
+        output_truncated=truncated,
+    )
+
+
+def _run_python_entrypoint_via_launcher(
+    *,
+    work_dir: Path,
+    filename: str,
+    timeout_sec: int,
+    memory_limit_mb: int,
+    max_output_chars: int,
+) -> SandboxedExecutionResult:
+    launcher_name = "__autorepair_launcher__.py"
+    launcher_path = work_dir / launcher_name
+    launcher_code = (
+        "import runpy\n"
+        "import sys\n\n"
+        "sys.path.insert(0, '')\n"
+        f"runpy.run_path({filename!r}, run_name='__main__')\n"
+    )
+    launcher_path.write_text(launcher_code, encoding="utf-8")
+    result = _run_python_entrypoint_safely(
+        work_dir=work_dir,
+        filename=launcher_name,
+        timeout_sec=timeout_sec,
+        memory_limit_mb=memory_limit_mb,
+        max_output_chars=max_output_chars,
+    )
+    return SandboxedExecutionResult(
+        filename=filename,
+        command=result.command,
+        work_dir=result.work_dir,
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        duration_sec=result.duration_sec,
+        timed_out=result.timed_out,
+        output_truncated=result.output_truncated,
+    )
+
+
 def run_python_code_safely(
     code: str,
     *,
@@ -125,69 +257,34 @@ def run_python_code_safely(
     memory_limit_mb: int = 256,
     max_output_chars: int = 20_000,
 ) -> SandboxedExecutionResult:
-    start = time.time()
-    timed_out = False
-    truncated = False
     with tempfile.TemporaryDirectory(prefix="autorepair-", dir="/tmp") as tmp_dir:
         work_dir = Path(tmp_dir)
         entrypoint = work_dir / filename
         entrypoint.write_text(code, encoding="utf-8")
-
-        stdout_path = work_dir / "stdout.txt"
-        stderr_path = work_dir / "stderr.txt"
-        command = ["python3", "-I", "-B", "-S", filename]
-        env = {
-            "HOME": str(work_dir),
-            "PATH": os.getenv("PATH", ""),
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONNOUSERSITE": "1",
-        }
-
-        with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open(
-            "w", encoding="utf-8"
-        ) as stderr_file:
-            process = subprocess.Popen(
-                command,
-                cwd=work_dir,
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                env=env,
-                text=True,
-                preexec_fn=lambda: _limit_resources(memory_limit_mb, timeout_sec, max_output_chars),
-            )
-            try:
-                returncode = process.wait(timeout=timeout_sec + 1)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
-                returncode = -signal.SIGKILL
-
-        stdout_text, stdout_truncated = _truncate_text(
-            stdout_path.read_text(encoding="utf-8", errors="replace"),
-            max_output_chars,
+        return _run_python_entrypoint_safely(
+            work_dir=work_dir,
+            filename=filename,
+            timeout_sec=timeout_sec,
+            memory_limit_mb=memory_limit_mb,
+            max_output_chars=max_output_chars,
         )
-        stderr_text, stderr_truncated = _truncate_text(
-            stderr_path.read_text(encoding="utf-8", errors="replace"),
-            max_output_chars,
-        )
-        truncated = stdout_truncated or stderr_truncated
 
-    end = time.time()
-    return SandboxedExecutionResult(
+
+def run_python_project_safely(
+    project_root: str | Path,
+    *,
+    filename: str,
+    timeout_sec: int = 5,
+    memory_limit_mb: int = 256,
+    max_output_chars: int = 20_000,
+) -> SandboxedExecutionResult:
+    work_dir = Path(project_root)
+    return _run_python_entrypoint_via_launcher(
+        work_dir=work_dir,
         filename=filename,
-        command=command,
-        work_dir=tmp_dir,
-        returncode=returncode,
-        stdout=stdout_text,
-        stderr=stderr_text,
-        duration_sec=end - start,
-        timed_out=timed_out,
-        output_truncated=truncated,
+        timeout_sec=timeout_sec,
+        memory_limit_mb=memory_limit_mb,
+        max_output_chars=max_output_chars,
     )
 
 
@@ -215,5 +312,50 @@ def build_runtime_inspection_report(
         "source": {
             "code": code,
             "focus_snippet": _build_snippet(code, primary_line),
+        },
+    }
+
+
+def build_project_runtime_inspection_report(
+    *,
+    file_map: dict[str, str],
+    entrypoint: str,
+    project_root: Path,
+    dependency_graph: dict[str, list[str]],
+    reverse_dependency_graph: dict[str, list[str]],
+    execution: SandboxedExecutionResult,
+    source_type: str,
+    source_label: str,
+) -> dict[str, Any]:
+    traceback_frames = _extract_project_traceback_frames(execution.stderr, project_root)
+    exception_type, exception_message = _extract_exception(execution.stderr)
+    primary_frame = traceback_frames[-1] if traceback_frames else None
+    focus_path = primary_frame["path"] if primary_frame else entrypoint
+    focus_code = file_map.get(focus_path, "")
+    primary_line = primary_frame["line_number"] if primary_frame else None
+
+    return {
+        "language": "python",
+        "entrypoint": entrypoint,
+        "execution": execution.to_dict(),
+        "failure": {
+            "exception_type": exception_type,
+            "exception_message": exception_message,
+            "timed_out": execution.timed_out,
+            "primary_frame": primary_frame,
+        },
+        "traceback_frames": traceback_frames,
+        "source": {
+            "entrypoint_code": file_map.get(entrypoint, ""),
+            "focus_path": focus_path,
+            "focus_snippet": _build_snippet(focus_code, primary_line),
+        },
+        "project": {
+            "source_type": source_type,
+            "source_label": source_label,
+            "file_count": len(file_map),
+            "files": sorted(file_map.keys())[:120],
+            "dependencies": dependency_graph.get(focus_path, []),
+            "reverse_dependencies": reverse_dependency_graph.get(focus_path, []),
         },
     }

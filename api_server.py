@@ -5,7 +5,7 @@ import os
 import queue
 import secrets
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
 from urllib.parse import urlencode
@@ -208,8 +208,8 @@ def _truncate_text(text: str, limit: int = 120) -> str:
     return f"{compact[: limit - 1]}…"
 
 
-def _agent_history_title(repair_request: RepairRequest) -> str:
-    return f"Repair · {repair_request.filename}"
+def _agent_history_title(repair_request: RepairRequest, filename: str | None = None) -> str:
+    return f"Repair · {filename or repair_request.filename or 'project'}"
 
 
 def _chat_history_title(messages: list[dict[str, str]]) -> str:
@@ -445,10 +445,14 @@ def repair_stream() -> Response:
     event_queue: queue.Queue[str | object] = queue.Queue()
     sentinel = object()
     captured: dict[str, Any] = {
-        "code": repair_request.code,
-        "filename": repair_request.filename,
+        "code": repair_request.code or "",
+        "filename": repair_request.filename or "",
         "language": repair_request.language,
         "model": repair_request.model,
+        "source_type": repair_request.source_type,
+        "github_repo_url": repair_request.github_repo_url,
+        "github_ref": repair_request.github_ref,
+        "project_subdir": repair_request.project_subdir,
         "run_result": None,
         "stages": _empty_stage_map(),
         "events": [],
@@ -465,9 +469,14 @@ def repair_stream() -> Response:
             if stage in captured["stages"]:
                 captured["stages"][stage]["status"] = outgoing.get("status", "idle")
         elif event == "run_result":
+            if outgoing.get("entrypoint"):
+                captured["filename"] = str(outgoing.get("entrypoint"))
             captured["run_result"] = {
                 "stdout": outgoing.get("stdout", ""),
                 "stderr": outgoing.get("stderr", ""),
+                "entrypoint": outgoing.get("entrypoint"),
+                "source_type": outgoing.get("source_type"),
+                "file_count": outgoing.get("file_count"),
                 "execution": outgoing.get("execution"),
             }
         elif event == "inspect_report":
@@ -507,7 +516,7 @@ def repair_stream() -> Response:
                         "arguments": outgoing.get("arguments"),
                         "output_preview": outgoing.get("output_preview"),
                         "output_truncated": bool(outgoing.get("output_truncated", False)),
-                        "at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                        "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
                     }
                 )
         elif event == "error":
@@ -515,7 +524,7 @@ def repair_stream() -> Response:
             saved = save_history(
                 user_id=user_id,
                 mode="agent",
-                title=_agent_history_title(repair_request),
+                title=_agent_history_title(repair_request, captured.get("filename")),
                 preview_text=_truncate_text(captured["error_message"] or "Agent run failed."),
                 model=repair_request.model,
                 language=repair_request.language,
@@ -523,6 +532,8 @@ def repair_stream() -> Response:
             )
             outgoing["history_id"] = saved["id"]
         elif event == "result":
+            if outgoing.get("filename"):
+                captured["filename"] = str(outgoing.get("filename"))
             captured["final_status"] = str(outgoing.get("status", ""))
             if captured["final_status"] == "clean":
                 preview_text = "No runtime error detected."
@@ -535,7 +546,7 @@ def repair_stream() -> Response:
             saved = save_history(
                 user_id=user_id,
                 mode="agent",
-                title=_agent_history_title(repair_request),
+                title=_agent_history_title(repair_request, captured.get("filename")),
                 preview_text=preview_text,
                 model=repair_request.model,
                 language=repair_request.language,
@@ -569,9 +580,10 @@ def repair_stream() -> Response:
         yield _format_sse(
             "accepted",
             {
-                "filename": repair_request.filename,
+                "filename": repair_request.filename or "",
                 "language": repair_request.language,
                 "model": repair_request.model,
+                "source_type": repair_request.source_type,
             },
         )
         while True:

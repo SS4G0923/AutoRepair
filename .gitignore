@@ -5,3 +5,6 @@ tmp
 frontend/.npm-cache
 frontend/dist
 frontend/node_modules
+__pycache__
+data
+.DS_Store
