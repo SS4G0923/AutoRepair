@@ -23,7 +23,7 @@ export const codeTemplates: Record<CodeLanguage, string> = {
   go: `package main\n\nimport "fmt"\n\nfunc main() {\n    panic("example error")\n    fmt.Println("unreachable")\n}\n`,
 };
 
-export const stageOrder: StageName[] = ["inspect", "plan", "code"];
+export const stageOrder: StageName[] = ["inspect", "plan", "code", "verify"];
 
 export const stageLabels: Record<UiLocale, Record<StageName, string>> = {
   en: {
@@ -31,12 +31,14 @@ export const stageLabels: Record<UiLocale, Record<StageName, string>> = {
     inspect: "Inspect",
     plan: "Plan",
     code: "Code",
+    verify: "Verify",
   },
   zh: {
     run: "运行检查",
     inspect: "问题分析",
     plan: "修复计划",
     code: "代码生成",
+    verify: "修复验证",
   },
 };
 
@@ -95,6 +97,8 @@ export const copy = {
     stdout: "STDOUT",
     stderr: "STDERR",
     finalDiff: "Final git diff",
+    verificationReady: "Verification passed. Review the patch and decide whether to accept it.",
+    verificationFailed: "Verification failed. The patch was generated, but the assertion checks did not pass.",
     applyPrompt: "Apply this diff to the editor?",
     applyAccept: "Apply changes",
     applyDecline: "Keep current code",
@@ -184,6 +188,8 @@ export const copy = {
     stdout: "标准输出",
     stderr: "错误输出",
     finalDiff: "最终 git diff",
+    verificationReady: "验证已通过，请检查这份 patch，并决定是否接受修改。",
+    verificationFailed: "验证未通过。patch 已生成，但断言检查没有全部通过。",
     applyPrompt: "是否将这份 diff 应用到编辑器？",
     applyAccept: "应用修改",
     applyDecline: "保持当前代码",

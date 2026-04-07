@@ -29,6 +29,7 @@ const createStageState = (): Record<StageName, StageState> => ({
   inspect: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
   plan: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
   code: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
+  verify: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
 });
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "autorepair-sidebar-width";
@@ -293,6 +294,7 @@ function App() {
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [finalDiff, setFinalDiff] = useState("");
   const [finalMessage, setFinalMessage] = useState("");
+  const [verificationPassed, setVerificationPassed] = useState<boolean | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [diffDecisionMessage, setDiffDecisionMessage] = useState("");
   const [diffApplied, setDiffApplied] = useState(false);
@@ -573,6 +575,7 @@ function App() {
     setRunResult(null);
     setFinalDiff("");
     setFinalMessage("");
+    setVerificationPassed(null);
     setErrorMessage("");
     setDiffDecisionMessage("");
     setDiffApplied(false);
@@ -710,6 +713,17 @@ function App() {
       return;
     }
 
+    if (eventName === "verify_report") {
+      setStages((current) => ({
+        ...current,
+        verify: {
+          ...current.verify,
+          report: JSON.stringify(data.report ?? {}, null, 2),
+        },
+      }));
+      return;
+    }
+
     if (eventName === "explain_chunk") {
       const stage = data.stage as StageName;
       const chunk = String(data.chunk ?? "");
@@ -738,7 +752,7 @@ function App() {
 
     if (eventName === "tool_event") {
       const stage = data.stage as StageName;
-      if (!stage || !["run", "inspect", "plan", "code"].includes(stage)) {
+      if (!stage || !["run", "inspect", "plan", "code", "verify"].includes(stage)) {
         return;
       }
       const toolEvent: ToolEventEntry = {
@@ -764,6 +778,7 @@ function App() {
 
     if (eventName === "error") {
       setErrorMessage(String(data.message ?? ""));
+      setVerificationPassed(false);
       if (typeof data.history_id === "number") {
         const historyId = Number(data.history_id);
         setSelectedHistoryId(historyId);
@@ -785,7 +800,24 @@ function App() {
 
     if (eventName === "result") {
       const resultStatus = String(data.status ?? "");
-      setFinalMessage(resultStatus === "clean" ? dict.cleanMessage : dict.repairedMessage);
+      const passed =
+        typeof data.verification_passed === "boolean"
+          ? Boolean(data.verification_passed)
+          : resultStatus === "verified";
+      setVerificationPassed(
+        resultStatus === "clean" ? null : resultStatus === "verified" ? true : passed ? true : false,
+      );
+      setFinalMessage(
+        resultStatus === "clean"
+          ? dict.cleanMessage
+          : resultStatus === "verified"
+            ? dict.verificationReady
+            : resultStatus === "verify_failed"
+              ? dict.verificationFailed
+              : typeof data.message === "string" && data.message
+                ? data.message
+                : dict.repairedMessage,
+      );
       if (typeof data.git_diff === "string") {
         setFinalDiff(data.git_diff);
       }
@@ -796,7 +828,14 @@ function App() {
           id: historyId,
           mode: "agent",
           title: `Repair · ${String(data.filename ?? "main.py")}`,
-          preview_text: resultStatus === "clean" ? dict.cleanMessage : dict.repairedMessage,
+          preview_text:
+            resultStatus === "clean"
+              ? dict.cleanMessage
+              : resultStatus === "verified"
+                ? dict.verificationReady
+                : resultStatus === "verify_failed"
+                  ? dict.verificationFailed
+                  : dict.repairedMessage,
           model,
           language,
           created_at: new Date().toISOString(),
@@ -818,6 +857,7 @@ function App() {
     setRunResult(null);
     setFinalDiff("");
     setFinalMessage("");
+    setVerificationPassed(null);
     setErrorMessage("");
     setDiffDecisionMessage("");
     setDiffApplied(false);
@@ -841,6 +881,7 @@ function App() {
     setRunResult(null);
     setFinalDiff("");
     setFinalMessage("");
+    setVerificationPassed(null);
     setErrorMessage("");
     setDiffDecisionMessage("");
     setDiffApplied(false);
@@ -875,6 +916,7 @@ function App() {
     setRunResult(null);
     setFinalDiff("");
     setFinalMessage("");
+    setVerificationPassed(null);
     setErrorMessage("");
     setDiffDecisionMessage("");
     setDiffApplied(false);
@@ -936,6 +978,10 @@ function App() {
         setChatThinking(false);
         setChatStreamingText("");
         setChatError("");
+        setVerificationPassed(null);
+        setFinalDiff("");
+        setFinalMessage("");
+        setErrorMessage("");
         setStatus("idle");
         return;
       }
@@ -960,9 +1006,20 @@ function App() {
       setFinalMessage(
         snapshot.final_status === "clean"
           ? dict.cleanMessage
-          : snapshot.final_status === "repaired"
-            ? dict.repairedMessage
+          : snapshot.final_status === "verified"
+            ? dict.verificationReady
+            : snapshot.final_status === "verify_failed"
+              ? dict.verificationFailed
+              : snapshot.final_status === "repaired"
+                ? dict.repairedMessage
             : "",
+      );
+      setVerificationPassed(
+        snapshot.final_status === "verified"
+          ? true
+          : snapshot.final_status === "verify_failed"
+            ? false
+            : null,
       );
       setErrorMessage(snapshot.error_message ?? "");
       setDiffDecisionMessage("");
@@ -1580,22 +1637,24 @@ function App() {
                               <pre className="overflow-y-auto whitespace-pre-wrap break-words rounded-3xl bg-slate-950 p-5 font-mono text-xs leading-6 text-slate-100 [overflow-wrap:anywhere] dark:bg-ink-900">
                                 {finalDiff}
                               </pre>
-                              <div className="mt-4 flex flex-wrap items-center gap-3">
-                                <div className="text-sm text-slate-600 dark:text-white/70">{dict.applyPrompt}</div>
-                                <button
-                                  onClick={handleApplyDiff}
-                                  disabled={diffApplied}
-                                  className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
-                                >
-                                  {dict.applyAccept}
-                                </button>
-                                <button
-                                  onClick={() => setDiffDecisionMessage(dict.applySkipped)}
-                                  className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
-                                >
-                                  {dict.applyDecline}
-                                </button>
-                              </div>
+                              {verificationPassed ? (
+                                <div className="mt-4 flex flex-wrap items-center gap-3">
+                                  <div className="text-sm text-slate-600 dark:text-white/70">{dict.applyPrompt}</div>
+                                  <button
+                                    onClick={handleApplyDiff}
+                                    disabled={diffApplied}
+                                    className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
+                                  >
+                                    {dict.applyAccept}
+                                  </button>
+                                  <button
+                                    onClick={() => setDiffDecisionMessage(dict.applySkipped)}
+                                    className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+                                  >
+                                    {dict.applyDecline}
+                                  </button>
+                                </div>
+                              ) : null}
                               {diffDecisionMessage ? (
                                 <div className="mt-4 rounded-3xl border border-black/10 bg-black/[0.03] px-4 py-3 text-sm text-slate-700 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/75">
                                   {diffDecisionMessage}

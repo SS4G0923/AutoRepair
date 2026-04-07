@@ -225,6 +225,7 @@ def _empty_stage_map() -> dict[str, dict[str, Any]]:
         "inspect": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
         "plan": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
         "code": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "verify": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
     }
 
 
@@ -482,6 +483,12 @@ def repair_stream() -> Response:
             captured["stages"]["code"]["report"] = diff_text
             captured["stages"]["code"]["diff"] = diff_text
             captured["final_diff"] = diff_text
+        elif event == "verify_report":
+            captured["stages"]["verify"]["report"] = json.dumps(
+                outgoing.get("report", {}),
+                ensure_ascii=False,
+                indent=2,
+            )
         elif event == "explain_chunk":
             stage = str(outgoing.get("stage", ""))
             if stage in captured["stages"]:
@@ -517,11 +524,14 @@ def repair_stream() -> Response:
             outgoing["history_id"] = saved["id"]
         elif event == "result":
             captured["final_status"] = str(outgoing.get("status", ""))
-            preview_text = (
-                "No runtime error detected."
-                if captured["final_status"] == "clean"
-                else "Repair diff is ready."
-            )
+            if captured["final_status"] == "clean":
+                preview_text = "No runtime error detected."
+            elif captured["final_status"] == "verified":
+                preview_text = "Repair diff verified and ready for review."
+            elif captured["final_status"] == "verify_failed":
+                preview_text = "Repair diff generated, but verification failed."
+            else:
+                preview_text = "Repair diff is ready."
             saved = save_history(
                 user_id=user_id,
                 mode="agent",

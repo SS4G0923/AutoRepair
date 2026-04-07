@@ -1,7 +1,7 @@
 export type UiLocale = "en" | "zh";
 export type ThemeMode = "light" | "dark";
 export type SessionStatus = "idle" | "streaming" | "done" | "error";
-export type StageName = "run" | "inspect" | "plan" | "code";
+export type StageName = "run" | "inspect" | "plan" | "code" | "verify";
 export type AuthMode = "login" | "register";
 export type OAuthProvider = "github" | "google";
 export type WorkspaceMode = "agent" | "chat";
