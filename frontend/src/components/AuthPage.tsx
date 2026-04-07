@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { GitHubLogo, GoogleLogo } from "./AuthIcons";
+import { AuthShowcase } from "./AuthShowcase";
 import type { AuthMode, AuthenticatedUser, OAuthProvider, UiLocale } from "../types";
 
 interface AuthPageProps {
@@ -107,46 +108,7 @@ export function AuthPage({
 
   return (
     <div className="mx-auto grid h-[calc(100vh-5.5rem)] max-w-[1400px] items-stretch gap-5 overflow-hidden px-4 py-4 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
-      <section className="flex h-full flex-col overflow-hidden rounded-[36px] border border-black/5 bg-white/70 p-7 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
-        <div className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-white/40">{copy.authEyebrow}</div>
-        <h1 className="mt-3 font-display text-4xl tracking-tight text-slate-900 dark:text-white xl:text-5xl">{copy.title}</h1>
-        <p className="mt-3 max-w-xl text-sm leading-7 text-slate-600 dark:text-white/72 xl:text-base">{copy.subtitle}</p>
-
-        <div className="mt-6 rounded-[32px] bg-slate-950 p-5 text-white dark:bg-ink-900 xl:mt-8 xl:p-6">
-          <div className="text-xs uppercase tracking-[0.28em] text-white/45">{copy.authTitle}</div>
-          <p className="mt-3 max-w-lg text-sm leading-6 text-white/72">{copy.authSubtitle}</p>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <button
-              onClick={() => handleOAuth("github")}
-              className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3 text-left transition hover:bg-white/12"
-            >
-              <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-white text-slate-950">
-                  <GitHubLogo />
-                </div>
-                <div>
-                  <div className="font-semibold">{copy.continueGithub}</div>
-                  <div className="mt-1 text-sm text-white/45">GitHub OAuth</div>
-                </div>
-              </div>
-            </button>
-            <button
-              onClick={() => handleOAuth("google")}
-              className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3 text-left transition hover:bg-white/12"
-            >
-              <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-white">
-                  <GoogleLogo />
-                </div>
-                <div>
-                  <div className="font-semibold">{copy.continueGoogle}</div>
-                  <div className="mt-1 text-sm text-white/45">Google OAuth</div>
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
-      </section>
+      <AuthShowcase locale={locale} />
 
       <section className="flex h-full flex-col overflow-hidden rounded-[36px] border border-black/5 bg-white/78 p-6 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow sm:p-7">
         <div className="grid grid-cols-2 gap-3 rounded-full border border-black/5 bg-black/[0.03] p-1 dark:border-white/10 dark:bg-white/[0.03]">
