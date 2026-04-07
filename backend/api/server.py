@@ -19,7 +19,17 @@ from backend.auth.store import (
     get_user_with_password,
     init_auth_db,
     normalize_email,
+    record_login_event,
+    touch_user_last_login,
     upsert_oauth_user,
+)
+from backend.admin.store import (
+    get_admin_dashboard,
+    get_llm_request_detail,
+    get_model_usage_report,
+    list_llm_requests_for_admin,
+    list_login_events_for_admin,
+    list_users_for_admin,
 )
 from backend.chat.pipeline import ChatRequest, run_chat_pipeline
 from backend.history.store import (
@@ -123,15 +133,45 @@ def _current_user() -> dict[str, Any] | None:
     if raw_user_id is None:
         return None
     try:
-        return get_user_by_id(int(raw_user_id))
+        user = get_user_by_id(int(raw_user_id))
     except (TypeError, ValueError):
         session.clear()
         return None
+    if user is None or user.get("account_status") != "active":
+        session.clear()
+        return None
+    return user
 
 
 def _set_user_session(user: dict[str, Any]) -> None:
     session.clear()
     session["user_id"] = user["id"]
+
+
+def _request_ip() -> str | None:
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for.strip():
+        return forwarded_for.split(",")[0].strip()
+    return request.remote_addr
+
+
+def _is_admin(user: dict[str, Any] | None) -> bool:
+    return bool(user and user.get("role") == "admin")
+
+
+def _finalize_login(user: dict[str, Any], *, login_method: str, email_attempt: str | None) -> dict[str, Any]:
+    touch_user_last_login(int(user["id"]))
+    refreshed_user = get_user_by_id(int(user["id"])) or user
+    record_login_event(
+        user_id=int(refreshed_user["id"]),
+        email_attempt=email_attempt,
+        login_method=login_method,
+        login_status="success",
+        ip_address=_request_ip(),
+        user_agent=request.headers.get("User-Agent"),
+    )
+    _set_user_session(refreshed_user)
+    return refreshed_user
 
 
 def _enabled_oauth_providers() -> list[str]:
@@ -169,6 +209,21 @@ def _require_login(view_func):
         user = _current_user()
         if user is None:
             return jsonify({"error": "Authentication required."}), 401
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
+def _require_admin(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return Response(status=204)
+        user = _current_user()
+        if user is None:
+            return jsonify({"error": "Authentication required."}), 401
+        if not _is_admin(user):
+            return jsonify({"error": "Admin access required."}), 403
         return view_func(*args, **kwargs)
 
     return wrapped
@@ -368,8 +423,8 @@ def register() -> Response:
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    _set_user_session(user)
-    return jsonify({"user": user, "oauth_providers": _enabled_oauth_providers()})
+    session_user = _finalize_login(user, login_method="local_register", email_attempt=email)
+    return jsonify({"user": session_user, "oauth_providers": _enabled_oauth_providers()})
 
 
 @app.route("/api/auth/login", methods=["POST", "OPTIONS"])
@@ -387,14 +442,34 @@ def login() -> Response:
         return jsonify({"error": str(exc)}), 400
 
     user = get_user_with_password(email)
+    if user is not None and user.get("account_status") != "active":
+        record_login_event(
+            user_id=int(user["id"]),
+            email_attempt=email,
+            login_method="local_login",
+            login_status="failed",
+            ip_address=_request_ip(),
+            user_agent=request.headers.get("User-Agent"),
+            failure_reason="account_suspended",
+        )
+        return jsonify({"error": "Account is suspended."}), 403
     if user is None or not user.get("password_hash") or not check_password_hash(user["password_hash"], password):
+        record_login_event(
+            user_id=int(user["id"]) if user is not None else None,
+            email_attempt=email,
+            login_method="local_login",
+            login_status="failed",
+            ip_address=_request_ip(),
+            user_agent=request.headers.get("User-Agent"),
+            failure_reason="Invalid email or password.",
+        )
         return jsonify({"error": "Invalid email or password."}), 401
 
     session_user = get_user_by_id(int(user["id"]))
     if session_user is None:
         return jsonify({"error": "User account could not be loaded."}), 500
 
-    _set_user_session(session_user)
+    session_user = _finalize_login(session_user, login_method="local_login", email_attempt=email)
     return jsonify({"user": session_user, "oauth_providers": _enabled_oauth_providers()})
 
 
@@ -430,11 +505,89 @@ def oauth_callback(provider: str) -> Response:
             display_name=display_name,
             avatar_url=avatar_url,
         )
-        _set_user_session(user)
+        if user.get("account_status") != "active":
+            record_login_event(
+                user_id=int(user["id"]),
+                email_attempt=email,
+                login_method=provider,
+                login_status="failed",
+                ip_address=_request_ip(),
+                user_agent=request.headers.get("User-Agent"),
+                failure_reason="account_suspended",
+            )
+            return redirect(_frontend_redirect_url(auth_error="account_suspended"))
+        _finalize_login(user, login_method=provider, email_attempt=email)
     except Exception:
+        record_login_event(
+            user_id=None,
+            email_attempt=None,
+            login_method=provider,
+            login_status="failed",
+            ip_address=_request_ip(),
+            user_agent=request.headers.get("User-Agent"),
+            failure_reason="oauth_callback_failed",
+        )
         return redirect(_frontend_redirect_url(auth_error="oauth_callback_failed"))
 
     return redirect(_frontend_redirect_url(auth_success="1"))
+
+
+@app.route("/api/admin/dashboard", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_dashboard() -> Response:
+    return jsonify(get_admin_dashboard())
+
+
+@app.route("/api/admin/users", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_users() -> Response:
+    limit = request.args.get("limit", default=200, type=int) or 200
+    return jsonify({"items": list_users_for_admin(limit=limit)})
+
+
+@app.route("/api/admin/llm-requests", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_llm_requests() -> Response:
+    page = request.args.get("page", default=1, type=int) or 1
+    page_size = request.args.get("page_size", default=25, type=int) or 25
+    query = request.args.get("q", default="", type=str) or ""
+    model = request.args.get("model", default="", type=str) or ""
+    status = request.args.get("status", default="", type=str) or ""
+    request_mode = request.args.get("request_mode", default="", type=str) or ""
+    return jsonify(
+        list_llm_requests_for_admin(
+            page=page,
+            page_size=page_size,
+            query=query,
+            model=model,
+            status=status,
+            request_mode=request_mode,
+        )
+    )
+
+
+@app.route("/api/admin/llm-requests/<int:request_id>", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_llm_request_detail(request_id: int) -> Response:
+    detail = get_llm_request_detail(request_id)
+    if detail is None:
+        return jsonify({"error": "LLM request was not found."}), 404
+    return jsonify(detail)
+
+
+@app.route("/api/admin/model-usage", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_model_usage() -> Response:
+    days = request.args.get("days", default=30, type=int) or 30
+    return jsonify(get_model_usage_report(days=days))
+
+
+@app.route("/api/admin/login-events", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_login_events() -> Response:
+    page = request.args.get("page", default=1, type=int) or 1
+    page_size = request.args.get("page_size", default=50, type=int) or 50
+    return jsonify(list_login_events_for_admin(page=page, page_size=page_size))
 
 
 @app.route("/api/repair/stream", methods=["POST", "OPTIONS"])
@@ -579,7 +732,7 @@ def repair_stream() -> Response:
 
     def worker() -> None:
         try:
-            run_repair_pipeline(repair_request, emit)
+            run_repair_pipeline(repair_request, emit, user_id=user_id)
         except Exception as exc:
             emit("error", {"message": str(exc)})
         finally:
@@ -661,7 +814,7 @@ def chat_stream() -> Response:
 
     def worker() -> None:
         try:
-            run_chat_pipeline(chat_request, emit)
+            run_chat_pipeline(chat_request, emit, user_id=user_id)
         except Exception as exc:
             emit("error", {"message": str(exc)})
         finally:

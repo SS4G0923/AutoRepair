@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from backend.llm import call_llm_for_json
+from backend.llm.telemetry import LLMCallContext
 
 DEFAULT_CHAT_MODEL = "qwen3.5-plus"
 MAX_MESSAGES = 40
@@ -93,7 +94,7 @@ def _build_chat_prompt(messages: list[ChatMessage]) -> str:
     )
 
 
-def run_chat_pipeline(request: ChatRequest, emit: EventEmitter) -> None:
+def run_chat_pipeline(request: ChatRequest, emit: EventEmitter, *, user_id: int | None = None) -> None:
     emit(
         "accepted",
         {
@@ -115,6 +116,13 @@ def run_chat_pipeline(request: ChatRequest, emit: EventEmitter) -> None:
         isJson=False,
         stream=True,
         stream_handler=on_chunk,
+        audit_context=LLMCallContext(
+            user_id=user_id,
+            history_id=request.history_id,
+            request_mode="chat",
+            stage="chat",
+            purpose="chat.reply",
+        ),
     )
 
     final_text = response_text.strip() if isinstance(response_text, str) else ""

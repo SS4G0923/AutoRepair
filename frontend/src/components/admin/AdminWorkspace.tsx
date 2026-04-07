@@ -1,0 +1,165 @@
+import type { Dispatch, SetStateAction } from "react";
+import type { AdminRequestFilters } from "../../app/useAdminConsole";
+import type { AppCopy } from "../../i18n";
+import type {
+  AdminDashboardData,
+  AdminLoginEventList,
+  AdminLlmRequestDetail,
+  AdminLlmRequestList,
+  AdminModelUsageReport,
+  AdminPage,
+  AdminUserItem,
+} from "../../types";
+import { AdminActivityPage } from "./AdminActivityPage";
+import { AdminDashboardPage } from "./AdminDashboardPage";
+import { AdminModelsPage } from "./AdminModelsPage";
+import { AdminRequestsPage } from "./AdminRequestsPage";
+import { AdminUsersPage } from "./AdminUsersPage";
+
+interface AdminWorkspaceProps {
+  activityPage: number;
+  adminError: string;
+  adminLoading: boolean;
+  adminPage: AdminPage;
+  copy: AppCopy;
+  dashboardData: AdminDashboardData | null;
+  loginEvents: AdminLoginEventList | null;
+  modelUsage: AdminModelUsageReport | null;
+  modelUsageDays: number;
+  requestDetail: AdminLlmRequestDetail | null;
+  requestDetailLoading: boolean;
+  requestFilters: AdminRequestFilters;
+  requests: AdminLlmRequestList | null;
+  selectedRequestId: number | null;
+  users: AdminUserItem[];
+  workspaceMainClass: string;
+  onActivityPageChange: (page: number) => void;
+  onModelUsageDaysChange: (days: number) => void;
+  onRefresh: () => void;
+  onRequestFiltersChange: Dispatch<SetStateAction<AdminRequestFilters>>;
+  onSelectRequest: (requestId: number) => void;
+}
+
+export function AdminWorkspace({
+  activityPage,
+  adminError,
+  adminLoading,
+  adminPage,
+  copy,
+  dashboardData,
+  loginEvents,
+  modelUsage,
+  modelUsageDays,
+  requestDetail,
+  requestDetailLoading,
+  requestFilters,
+  requests,
+  selectedRequestId,
+  users,
+  workspaceMainClass,
+  onActivityPageChange,
+  onModelUsageDaysChange,
+  onRefresh,
+  onRequestFiltersChange,
+  onSelectRequest,
+}: AdminWorkspaceProps) {
+  const pageMeta: Record<AdminPage, { eyebrow: string; title: string; hint: string }> = {
+    dashboard: {
+      eyebrow: copy.adminDashboard,
+      title: copy.adminDashboardTitle,
+      hint: copy.adminDashboardHint,
+    },
+    users: {
+      eyebrow: copy.adminUsers,
+      title: copy.adminUsersTitle,
+      hint: copy.adminUsersHint,
+    },
+    requests: {
+      eyebrow: copy.adminRequests,
+      title: copy.adminRequestsTitle,
+      hint: copy.adminRequestsHint,
+    },
+    models: {
+      eyebrow: copy.adminModels,
+      title: copy.adminModelsTitle,
+      hint: copy.adminModelsHint,
+    },
+    activity: {
+      eyebrow: copy.adminActivity,
+      title: copy.adminActivityTitle,
+      hint: copy.adminActivityHint,
+    },
+  };
+
+  const activeMeta = pageMeta[adminPage];
+
+  return (
+    <section
+      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow ${workspaceMainClass}`}
+    >
+      <div className="shrink-0 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-[0.32em] text-slate-500 dark:text-white/40">
+            {activeMeta.eyebrow}
+          </div>
+          <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">
+            {activeMeta.title}
+          </div>
+          <div className="mt-2 max-w-4xl text-sm text-slate-600 dark:text-white/65">
+            {activeMeta.hint}
+          </div>
+        </div>
+
+        <button
+          onClick={onRefresh}
+          className={`rounded-full px-5 py-3 text-sm font-semibold transition ${
+            adminLoading
+              ? "cursor-wait bg-slate-300 text-slate-700 dark:bg-white/20 dark:text-white/75"
+              : "bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
+          }`}
+        >
+          {copy.adminRefresh}
+        </button>
+      </div>
+
+      {adminError ? (
+        <div className="mt-3 rounded-[20px] border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200">
+          {adminError}
+        </div>
+      ) : null}
+
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+        {adminPage === "dashboard" ? (
+          <AdminDashboardPage copy={copy} data={dashboardData} />
+        ) : adminPage === "users" ? (
+          <AdminUsersPage copy={copy} users={users} />
+        ) : adminPage === "requests" ? (
+          <AdminRequestsPage
+            copy={copy}
+            requestDetail={requestDetail}
+            requestDetailLoading={requestDetailLoading}
+            requestFilters={requestFilters}
+            requests={requests}
+            selectedRequestId={selectedRequestId}
+            setRequestFilters={onRequestFiltersChange}
+            onSelectRequest={onSelectRequest}
+          />
+        ) : adminPage === "models" ? (
+          <AdminModelsPage
+            copy={copy}
+            days={modelUsageDays}
+            modelUsage={modelUsage}
+            onDaysChange={onModelUsageDaysChange}
+          />
+        ) : (
+          <AdminActivityPage
+            activityPage={activityPage}
+            copy={copy}
+            loginEvents={loginEvents}
+            onPageChange={onActivityPageChange}
+          />
+        )}
+      </div>
+    </section>
+  );
+}

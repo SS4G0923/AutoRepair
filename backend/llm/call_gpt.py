@@ -133,6 +133,36 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
     )
 
 
+def _extract_usage(usage: Any) -> dict[str, int] | None:
+    if usage is None:
+        return None
+
+    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    total_tokens = int(getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens))
+
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    cached_input_tokens = int(getattr(prompt_details, "cached_tokens", 0) or 0) if prompt_details else 0
+    reasoning_tokens = (
+        int(getattr(completion_details, "reasoning_tokens", 0) or 0)
+        if completion_details
+        else 0
+    )
+
+    if total_tokens <= 0 and input_tokens <= 0 and output_tokens <= 0:
+        return None
+
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "token_source": "provider",
+    }
+
+
 def _serialize_tool_call(tool_call: Any) -> dict[str, Any]:
     if hasattr(tool_call, "model_dump"):
         return tool_call.model_dump(exclude_none=True)
@@ -209,12 +239,22 @@ def _call_with_tools(
     stream_handler: Callable[[str], None] | None,
     tools: list[FunctionTool],
     tool_event_handler: Callable[[str, dict[str, Any]], None] | None,
+    metadata_handler: Callable[[dict[str, Any]], None] | None,
 ) -> dict[str, Any] | str:
     tool_registry = {tool.name: tool for tool in tools}
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
     ]
+    usage_totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cached_input_tokens": 0,
+        "reasoning_tokens": 0,
+        "token_source": "provider",
+    }
+    has_provider_usage = False
 
     for round_index in range(MAX_TOOL_ROUNDS):
         try:
@@ -229,10 +269,23 @@ def _call_with_tools(
         if not response.choices:
             raise LLMCallError("OpenAI response did not include any choices.")
 
+        usage = _extract_usage(getattr(response, "usage", None))
+        if usage is not None:
+            has_provider_usage = True
+            for key in ("input_tokens", "output_tokens", "total_tokens", "cached_input_tokens", "reasoning_tokens"):
+                usage_totals[key] += int(usage.get(key, 0))
+
         message = response.choices[0].message
         tool_calls = list(getattr(message, "tool_calls", None) or [])
         if not tool_calls:
             response_text = _extract_message_text(message.content).strip()
+            if metadata_handler is not None:
+                metadata_handler(
+                    {
+                        "raw_response_text": response_text,
+                        "usage": usage_totals if has_provider_usage else None,
+                    }
+                )
             if stream and not isJson and response_text:
                 if stream_handler is not None:
                     stream_handler(response_text)
@@ -302,6 +355,7 @@ def call_llm_for_json(
     stream_handler: Callable[[str], None] | None = None,
     tools: list[FunctionTool] | None = None,
     tool_event_handler: Callable[[str, dict[str, Any]], None] | None = None,
+    metadata_handler: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any] | str:
     """
     Call an OpenAI chat model and parse the response as JSON.
@@ -325,6 +379,7 @@ def call_llm_for_json(
             stream_handler=stream_handler,
             tools=tools,
             tool_event_handler=tool_event_handler,
+            metadata_handler=metadata_handler,
         )
 
     try:
@@ -343,7 +398,11 @@ def call_llm_for_json(
                 stream=True,
             )
             response_text_parts: list[str] = []
+            latest_usage: dict[str, int] | None = None
             for chunk in response:
+                usage = _extract_usage(getattr(chunk, "usage", None))
+                if usage is not None:
+                    latest_usage = usage
                 if not chunk.choices:
                     continue
                 delta_text = _extract_delta_text(chunk.choices[0].delta.content)
@@ -356,7 +415,15 @@ def call_llm_for_json(
                 response_text_parts.append(delta_text)
             if response_text_parts and stream_handler is None:
                 print(file=sys.stdout, flush=True)
-            return "".join(response_text_parts).strip()
+            response_text = "".join(response_text_parts).strip()
+            if metadata_handler is not None:
+                metadata_handler(
+                    {
+                        "raw_response_text": response_text,
+                        "usage": latest_usage,
+                    }
+                )
+            return response_text
 
         response = resolved_client.chat.completions.create(**request_kwargs)
     except Exception as exc:
@@ -367,6 +434,13 @@ def call_llm_for_json(
 
     message = response.choices[0].message
     response_text = _extract_message_text(message.content).strip()
+    if metadata_handler is not None:
+        metadata_handler(
+            {
+                "raw_response_text": response_text,
+                "usage": _extract_usage(getattr(response, "usage", None)),
+            }
+        )
 
     if not isJson:
         return response_text

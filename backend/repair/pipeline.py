@@ -10,6 +10,7 @@ from typing import Any, Callable
 from backend.inspector.inspector_prompt import build_planner_prompt
 from backend.llm import call_llm_for_json
 from backend.llm.agent_tools import RepairToolContext, build_repair_tools
+from backend.llm.telemetry import LLMCallContext
 from backend.repair.workspace import (
     ProjectFileInput,
     build_project_runtime_inspection_report,
@@ -737,6 +738,7 @@ def _stream_explain(
     system_prompt: str,
     model: str,
     emit: EventEmitter,
+    audit_context: LLMCallContext | None = None,
 ) -> str:
     _emit_stage(emit, stage, "explaining")
 
@@ -750,6 +752,7 @@ def _stream_explain(
         isJson=False,
         stream=True,
         stream_handler=on_chunk,
+        audit_context=audit_context,
     )
     emit("explain_done", {"stage": stage, "text": explain_text})
     return explain_text
@@ -769,7 +772,12 @@ def _build_tool_event_handler(emit: EventEmitter, stage: str) -> Callable[[str, 
     return on_tool_event
 
 
-def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
+def run_repair_pipeline(
+    request: RepairRequest,
+    emit: EventEmitter,
+    *,
+    user_id: int | None = None,
+) -> None:
     with prepare_project_workspace(
         code=request.code,
         filename=request.filename,
@@ -779,6 +787,15 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
         github_ref=request.github_ref,
         project_subdir=request.project_subdir,
     ) as workspace:
+        def make_llm_context(stage: str, purpose: str) -> LLMCallContext:
+            return LLMCallContext(
+                user_id=user_id,
+                request_mode="repair",
+                stage=stage,
+                purpose=purpose,
+                source_type=request.source_type,
+            )
+
         _emit_stage(
             emit,
             "run",
@@ -835,6 +852,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             isJson=True,
             tools=stage_tools,
             tool_event_handler=_build_tool_event_handler(emit, "inspect"),
+            audit_context=make_llm_context("inspect", "inspect.report"),
         )
         emit("inspect_report", {"stage": "inspect", "report": inspector_report})
         _stream_explain(
@@ -850,6 +868,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             system_prompt=INSPECT_EXPLAIN_SYSTEM_PROMPT,
             model=request.model,
             emit=emit,
+            audit_context=make_llm_context("inspect", "inspect.explain"),
         )
         _emit_stage(emit, "inspect", "completed")
 
@@ -862,6 +881,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             isJson=False,
             tools=stage_tools,
             tool_event_handler=_build_tool_event_handler(emit, "plan"),
+            audit_context=make_llm_context("plan", "plan.report"),
         )
         emit("plan_report", {"stage": "plan", "report": planner_report})
         _stream_explain(
@@ -877,6 +897,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             system_prompt=PLAN_EXPLAIN_SYSTEM_PROMPT,
             model=request.model,
             emit=emit,
+            audit_context=make_llm_context("plan", "plan.explain"),
         )
         _emit_stage(emit, "plan", "completed")
 
@@ -922,6 +943,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             stream_handler=on_diff_chunk,
             tools=stage_tools,
             tool_event_handler=_build_tool_event_handler(emit, "code"),
+            audit_context=make_llm_context("code", "code.diff"),
         )
         git_diff = _coerce_model_output_to_diff(
             raw_diff,
@@ -945,6 +967,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             system_prompt=CODE_EXPLAIN_SYSTEM_PROMPT,
             model=request.model,
             emit=emit,
+            audit_context=make_llm_context("code", "code.explain"),
         )
         _emit_stage(emit, "code", "completed")
 
@@ -988,6 +1011,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             isJson=True,
             tools=verify_tools,
             tool_event_handler=_build_tool_event_handler(emit, "verify"),
+            audit_context=make_llm_context("verify", "verify.report"),
         )
         verification_base_source, skipped_verification_nodes = _build_verification_base_source(
             patched_files.get(workspace.entrypoint, ""),
@@ -1061,6 +1085,7 @@ def run_repair_pipeline(request: RepairRequest, emit: EventEmitter) -> None:
             system_prompt=VERIFY_EXPLAIN_SYSTEM_PROMPT,
             model=request.model,
             emit=emit,
+            audit_context=make_llm_context("verify", "verify.explain"),
         )
         _emit_stage(emit, "verify", "completed")
 

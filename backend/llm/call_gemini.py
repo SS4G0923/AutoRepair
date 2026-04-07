@@ -110,6 +110,30 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
     )
 
 
+def _extract_usage(response: Any) -> dict[str, int] | None:
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return None
+
+    input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
+    output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
+    total_tokens = int(getattr(usage, "total_token_count", 0) or (input_tokens + output_tokens))
+    cached_input_tokens = int(getattr(usage, "cached_content_token_count", 0) or 0)
+    reasoning_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
+
+    if total_tokens <= 0 and input_tokens <= 0 and output_tokens <= 0:
+        return None
+
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "token_source": "provider",
+    }
+
+
 def call_llm_for_json(
     prompt: str,
     *,
@@ -122,6 +146,7 @@ def call_llm_for_json(
     stream_handler: Callable[[str], None] | None = None,
     tools=None,
     tool_event_handler=None,
+    metadata_handler: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any] | str:
     if not prompt.strip():
         raise ValueError("Prompt must not be empty.")
@@ -147,7 +172,11 @@ def call_llm_for_json(
                 config=config,
             )
             response_text_parts: list[str] = []
+            latest_usage: dict[str, int] | None = None
             for chunk in response_stream:
+                usage = _extract_usage(chunk)
+                if usage is not None:
+                    latest_usage = usage
                 chunk_text = _extract_response_text(chunk)
                 if not chunk_text:
                     continue
@@ -158,7 +187,15 @@ def call_llm_for_json(
                 response_text_parts.append(chunk_text)
             if response_text_parts and stream_handler is None:
                 print(file=sys.stdout, flush=True)
-            return "".join(response_text_parts).strip()
+            response_text = "".join(response_text_parts).strip()
+            if metadata_handler is not None:
+                metadata_handler(
+                    {
+                        "raw_response_text": response_text,
+                        "usage": latest_usage,
+                    }
+                )
+            return response_text
 
         response = resolved_client.models.generate_content(
             model=model,
@@ -169,6 +206,13 @@ def call_llm_for_json(
         raise LLMCallError(f"Gemini request failed: {exc}") from exc
 
     response_text = _extract_response_text(response).strip()
+    if metadata_handler is not None:
+        metadata_handler(
+            {
+                "raw_response_text": response_text,
+                "usage": _extract_usage(response),
+            }
+        )
 
     if not isJson:
         return response_text

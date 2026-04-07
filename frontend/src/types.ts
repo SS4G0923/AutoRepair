@@ -4,8 +4,11 @@ export type SessionStatus = "idle" | "streaming" | "done" | "error";
 export type StageName = "run" | "inspect" | "plan" | "code" | "verify";
 export type AuthMode = "login" | "register";
 export type OAuthProvider = "github" | "google";
-export type WorkspaceMode = "agent" | "chat";
+export type WorkspaceMode = "agent" | "chat" | "admin";
 export type AgentSourceType = "single_file" | "zip" | "github";
+export type UserRole = "basic" | "admin";
+export type AccountStatus = "active" | "suspended";
+export type AdminPage = "dashboard" | "users" | "requests" | "models" | "activity";
 
 export type CodeLanguage = "python" | "javascript" | "typescript" | "java" | "go";
 export type ModelOptionValue = string;
@@ -68,7 +71,11 @@ export interface AuthenticatedUser {
   display_name: string;
   avatar_url: string | null;
   auth_source: string;
+  role: UserRole;
+  account_status: AccountStatus;
   created_at: string;
+  updated_at: string | null;
+  last_login_at: string | null;
 }
 
 export interface ChatMessage {
@@ -116,4 +123,168 @@ export interface ChatHistorySnapshot {
 
 export interface HistoryDetail extends HistorySummary {
   snapshot: AgentHistorySnapshot | ChatHistorySnapshot;
+}
+
+export interface AdminDashboardSummary {
+  total_users: number;
+  admin_users: number;
+  new_users_7d: number;
+  llm_requests_7d: number;
+  chat_requests_7d: number;
+  repair_requests_7d: number;
+  failed_requests_7d: number;
+  total_tokens_7d: number;
+}
+
+export interface AdminDailyTokenUsage {
+  day: string;
+  request_count: number;
+  total_tokens: number;
+}
+
+export interface AdminDailyUserGrowth {
+  day: string;
+  new_users: number;
+  cumulative_users: number;
+}
+
+export interface AdminModelUsageItem {
+  model: string;
+  provider: string;
+  request_count: number;
+  total_tokens: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  avg_latency_ms: number;
+  last_used_at: string | null;
+}
+
+export interface AdminLatestRequestItem {
+  id: number;
+  request_mode: string;
+  stage: string | null;
+  purpose: string | null;
+  provider: string;
+  model: string;
+  request_status: string;
+  started_at: string;
+  user_id: number | null;
+  user_email: string | null;
+  user_display_name: string | null;
+  total_tokens: number;
+}
+
+export interface AdminDashboardData {
+  summary: AdminDashboardSummary;
+  daily_token_usage: AdminDailyTokenUsage[];
+  daily_user_growth: AdminDailyUserGrowth[];
+  model_usage: AdminModelUsageItem[];
+  latest_requests: AdminLatestRequestItem[];
+}
+
+export interface AdminUserItem {
+  id: number;
+  email: string;
+  display_name: string;
+  avatar_url: string | null;
+  auth_source: string;
+  role: UserRole;
+  account_status: AccountStatus;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+  history_count: number;
+  llm_request_count: number;
+  total_tokens: number;
+}
+
+export interface AdminLlmRequestItem {
+  id: number;
+  user_id: number | null;
+  user_email: string | null;
+  user_display_name: string | null;
+  history_id: number | null;
+  request_mode: string;
+  stage: string | null;
+  purpose: string | null;
+  provider: string;
+  model: string;
+  source_type: string | null;
+  is_streaming: boolean;
+  is_json_response: boolean;
+  request_status: string;
+  token_source: string | null;
+  prompt_chars: number;
+  response_chars: number;
+  latency_ms: number;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface AdminLlmRequestList {
+  items: AdminLlmRequestItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface AdminLlmToolEvent {
+  id: number;
+  round_index: number | null;
+  status: string;
+  tool_name: string;
+  arguments_json: string;
+  output_preview: string;
+  output_truncated: boolean;
+  created_at: string;
+}
+
+export interface AdminLlmRequestDetail {
+  request: AdminLlmRequestItem & {
+    cached_input_tokens: number;
+    reasoning_tokens: number;
+  };
+  message: {
+    system_prompt: string;
+    prompt_text: string;
+    response_text: string;
+    parsed_response_json: string;
+  };
+  tool_events: AdminLlmToolEvent[];
+}
+
+export interface AdminModelUsageReport {
+  days: number;
+  items: AdminModelUsageItem[];
+  daily_series: Array<{
+    day: string;
+    model: string;
+    request_count: number;
+    total_tokens: number;
+  }>;
+}
+
+export interface AdminLoginEventItem {
+  id: number;
+  user_id: number | null;
+  user_email: string | null;
+  user_display_name: string | null;
+  email_attempt: string | null;
+  login_method: string;
+  login_status: string;
+  failure_reason: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export interface AdminLoginEventList {
+  items: AdminLoginEventItem[];
+  page: number;
+  page_size: number;
+  total: number;
 }

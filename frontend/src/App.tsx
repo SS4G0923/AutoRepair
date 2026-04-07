@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
+import { useAdminConsole } from "./app/useAdminConsole";
 import { useChatSession } from "./app/useChatSession";
 import { useRepairSession } from "./app/useRepairSession";
 import { useSidebarLayout } from "./app/useSidebarLayout";
 import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from "./app/utils";
 import { AuthPage } from "./components/AuthPage";
+import { AdminWorkspace } from "./components/admin/AdminWorkspace";
 import { AgentWorkspace } from "./components/app/AgentWorkspace";
 import { AppHeader } from "./components/app/AppHeader";
 import { AppSidebar } from "./components/app/AppSidebar";
 import { ChatWorkspace } from "./components/app/ChatWorkspace";
 import { copy, modelOptions } from "./i18n";
 import type {
+  AdminPage,
   AgentHistorySnapshot,
   AuthenticatedUser,
   ChatHistorySnapshot,
@@ -53,6 +56,7 @@ function App() {
 
   const dict = copy[locale];
   const activeModel = modelOptions.find((item) => item.value === model) ?? modelOptions[0];
+  const canAccessAdmin = currentUser?.role === "admin";
 
   const repair = useRepairSession({
     apiBaseUrl,
@@ -69,6 +73,11 @@ function App() {
     refreshHistoryList: fetchHistoryList,
     selectHistory: setSelectedHistoryId,
     upsertHistoryItem,
+  });
+
+  const admin = useAdminConsole({
+    apiBaseUrl,
+    enabled: Boolean(currentUser && canAccessAdmin && workspaceMode === "admin"),
   });
 
   function upsertHistoryItem(summary: HistorySummary) {
@@ -169,6 +178,16 @@ function App() {
   }, [currentUser]);
 
   useEffect(() => {
+    if (currentUser?.role === "admin") {
+      return;
+    }
+    if (workspaceMode === "admin") {
+      setWorkspaceMode("agent");
+    }
+    admin.resetAdminState();
+  }, [currentUser?.role]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     oauthReturnRef.current = params.get("auth_success") === "1";
     if (params.get("auth_error") === "provider_unavailable") {
@@ -237,6 +256,7 @@ function App() {
     setSelectedHistoryId(null);
     repair.resetRepairState();
     chat.resetChatState({ abort: true, clearActiveHistoryId: true });
+    admin.resetAdminState();
   }
 
   function handleReset() {
@@ -256,6 +276,24 @@ function App() {
     setSelectedHistoryId(null);
     repair.resetRepairState();
     chat.resetChatState({ abort: true, clearActiveHistoryId: true });
+  }
+
+  function openAdminConsole() {
+    if (!canAccessAdmin) {
+      return;
+    }
+    setUserMenuOpen(false);
+    admin.setAdminPage("dashboard");
+    setWorkspaceMode("admin");
+    admin.refreshAdminData();
+  }
+
+  function selectAdminPage(page: AdminPage) {
+    if (!canAccessAdmin) {
+      return;
+    }
+    setWorkspaceMode("admin");
+    admin.setAdminPage(page);
   }
 
   function handleAuthenticated(user: AuthenticatedUser, providers: OAuthProvider[]) {
@@ -355,12 +393,14 @@ function App() {
         }`}
       >
         <AppHeader
+          canAccessAdmin={Boolean(canAccessAdmin)}
           currentUser={currentUser}
           copy={dict}
           theme={theme}
           userMenuOpen={userMenuOpen}
           userMenuRef={userMenuRef}
           onLogout={handleLogout}
+          onOpenAdmin={openAdminConsole}
           onToggleLocale={() => setLocale((current) => (current === "zh" ? "en" : "zh"))}
           onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           onToggleUserMenu={() => setUserMenuOpen((current) => !current)}
@@ -407,6 +447,8 @@ function App() {
               }
             >
               <AppSidebar
+                adminPage={admin.adminPage}
+                canAccessAdmin={Boolean(canAccessAdmin)}
                 copy={dict}
                 deletingHistoryId={deletingHistoryId}
                 historyItems={historyItems}
@@ -420,7 +462,9 @@ function App() {
                 onOpenHistory={(historyId) => {
                   void handleHistoryOpen(historyId);
                 }}
+                onSelectAdminPage={selectAdminPage}
                 onStartNewAgentSession={startNewAgentSession}
+                onStartNewAdminSession={openAdminConsole}
                 onStartNewChatSession={startNewChatSession}
               />
 
@@ -446,7 +490,31 @@ function App() {
                 </div>
               ) : null}
 
-              {workspaceMode === "agent" ? (
+              {workspaceMode === "admin" ? (
+                <AdminWorkspace
+                  activityPage={admin.activityPage}
+                  adminError={admin.adminError}
+                  adminLoading={admin.adminLoading}
+                  adminPage={admin.adminPage}
+                  copy={dict}
+                  dashboardData={admin.dashboardData}
+                  loginEvents={admin.loginEvents}
+                  modelUsage={admin.modelUsage}
+                  modelUsageDays={admin.modelUsageDays}
+                  requestDetail={admin.requestDetail}
+                  requestDetailLoading={admin.requestDetailLoading}
+                  requestFilters={admin.requestFilters}
+                  requests={admin.requests}
+                  selectedRequestId={admin.selectedRequestId}
+                  users={admin.users}
+                  workspaceMainClass={workspaceMainClass}
+                  onActivityPageChange={admin.setActivityPage}
+                  onModelUsageDaysChange={admin.setModelUsageDays}
+                  onRefresh={admin.refreshAdminData}
+                  onRequestFiltersChange={admin.setRequestFilters}
+                  onSelectRequest={admin.setSelectedRequestId}
+                />
+              ) : workspaceMode === "agent" ? (
                 <AgentWorkspace
                   agentSourceType={repair.agentSourceType}
                   code={repair.code}

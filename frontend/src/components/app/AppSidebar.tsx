@@ -1,20 +1,21 @@
 import type { AppCopy } from "../../i18n";
-import type { HistorySummary, WorkspaceMode } from "../../types";
-import { AgentIcon, ChatIcon, TrashIcon } from "./AppIcons";
+import type { AdminPage, HistorySummary, WorkspaceMode } from "../../types";
+import {
+  ActivityIcon,
+  AdminIcon,
+  AgentIcon,
+  ChatIcon,
+  DashboardIcon,
+  ModelsIcon,
+  RequestsIcon,
+  TrashIcon,
+  UsersIcon,
+} from "./AppIcons";
 
 interface AppSidebarProps {
-  copy: Pick<
-    AppCopy,
-    | "historyDelete"
-    | "historyEmpty"
-    | "historyLoading"
-    | "modeAgent"
-    | "modeAgentHint"
-    | "modeChat"
-    | "modeChatHint"
-    | "sidebarHistory"
-    | "sidebarWorkspace"
-  >;
+  adminPage: AdminPage;
+  canAccessAdmin: boolean;
+  copy: AppCopy;
   deletingHistoryId: number | null;
   historyItems: HistorySummary[];
   historyLoading: boolean;
@@ -23,11 +24,15 @@ interface AppSidebarProps {
   workspaceMode: WorkspaceMode;
   onDeleteHistory: (historyId: number) => void;
   onOpenHistory: (historyId: number) => void;
+  onSelectAdminPage: (page: AdminPage) => void;
   onStartNewAgentSession: () => void;
+  onStartNewAdminSession: () => void;
   onStartNewChatSession: () => void;
 }
 
 export function AppSidebar({
+  adminPage,
+  canAccessAdmin,
   copy,
   deletingHistoryId,
   historyItems,
@@ -37,9 +42,49 @@ export function AppSidebar({
   workspaceMode,
   onDeleteHistory,
   onOpenHistory,
+  onSelectAdminPage,
   onStartNewAgentSession,
+  onStartNewAdminSession,
   onStartNewChatSession,
 }: AppSidebarProps) {
+  const adminNavItems: Array<{
+    page: AdminPage;
+    label: string;
+    hint: string;
+    icon: typeof DashboardIcon;
+  }> = [
+    {
+      page: "dashboard",
+      label: copy.adminDashboard,
+      hint: copy.adminDashboardHint,
+      icon: DashboardIcon,
+    },
+    {
+      page: "users",
+      label: copy.adminUsers,
+      hint: copy.adminUsersHint,
+      icon: UsersIcon,
+    },
+    {
+      page: "requests",
+      label: copy.adminRequests,
+      hint: copy.adminRequestsHint,
+      icon: RequestsIcon,
+    },
+    {
+      page: "models",
+      label: copy.adminModels,
+      hint: copy.adminModelsHint,
+      icon: ModelsIcon,
+    },
+    {
+      page: "activity",
+      label: copy.adminActivity,
+      hint: copy.adminActivityHint,
+      icon: ActivityIcon,
+    },
+  ];
+
   return (
     <aside
       className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden pr-1 ${!isDesktopLayout ? "shrink-0" : ""}`}
@@ -98,15 +143,77 @@ export function AppSidebar({
               </div>
             </div>
           </button>
+
+          {canAccessAdmin ? (
+            <button
+              onClick={onStartNewAdminSession}
+              className={`flex w-full items-center gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
+                workspaceMode === "admin"
+                  ? "bg-slate-900 text-white shadow-lg dark:bg-white dark:text-slate-950"
+                  : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
+              }`}
+            >
+              <div className="grid h-8 w-8 place-items-center rounded-lg bg-black/10 dark:bg-white/10">
+                <AdminIcon />
+              </div>
+              <div className="min-w-0">
+                <div className="font-medium">{copy.modeAdmin}</div>
+                <div
+                  className={`text-xs ${
+                    workspaceMode === "admin"
+                      ? "text-white/70 dark:text-slate-950/70"
+                      : "text-slate-500 dark:text-white/40"
+                  }`}
+                >
+                  {copy.modeAdminHint}
+                </div>
+              </div>
+            </button>
+          ) : null}
         </div>
       </section>
 
       <section className="flex min-h-0 flex-1 flex-col rounded-[22px] border border-black/5 bg-white/72 p-2.5 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
         <div className="shrink-0 px-2 text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
-          {copy.sidebarHistory}
+          {workspaceMode === "admin" ? copy.adminNavTitle : copy.sidebarHistory}
         </div>
+
         <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto">
-          {historyLoading && historyItems.length === 0 ? (
+          {workspaceMode === "admin" && canAccessAdmin ? (
+            <div className="space-y-1.5 pr-1">
+              {adminNavItems.map((item) => {
+                const Icon = item.icon;
+                const active = adminPage === item.page;
+                return (
+                  <button
+                    key={item.page}
+                    onClick={() => onSelectAdminPage(item.page)}
+                    className={`flex w-full items-start gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
+                      active
+                        ? "bg-slate-900 text-white shadow-lg dark:bg-white dark:text-slate-950"
+                        : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-black/10 dark:bg-white/10">
+                      <Icon />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{item.label}</div>
+                      <div
+                        className={`mt-1 line-clamp-2 text-xs ${
+                          active
+                            ? "text-white/70 dark:text-slate-950/70"
+                            : "text-slate-500 dark:text-white/40"
+                        }`}
+                      >
+                        {item.hint}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : historyLoading && historyItems.length === 0 ? (
             <div className="rounded-[22px] bg-black/[0.03] px-4 py-4 text-sm text-slate-500 dark:bg-white/[0.03] dark:text-white/45">
               {copy.historyLoading}
             </div>
