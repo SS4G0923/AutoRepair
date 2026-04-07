@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from auth_store import get_db_connection
+from backend.auth.store import get_db_connection
 
 
 def _serialize_history_row(row: dict[str, Any]) -> dict[str, Any]:

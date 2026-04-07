@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from llm.call_gemini import call_llm_for_json as call_gemini_for_json
-from llm.call_gpt import call_llm_for_json as call_gpt_for_json
-from inspector.inspector_prompt import build_planner_prompt
-from inspector.inspector import run_defects4j_inspection
+from backend.inspector.inspector import run_defects4j_inspection
+from backend.inspector.inspector_prompt import build_planner_prompt
+from backend.llm.call_gemini import call_llm_for_json as call_gemini_for_json
+from backend.llm.call_gpt import call_llm_for_json as call_gpt_for_json
 
 
 def call_llm_for_json(

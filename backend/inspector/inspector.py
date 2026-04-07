@@ -5,13 +5,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from inspector.defects4j_runner import Defects4JRunner, Defects4JError
-from inspector.stacktrace_filter import (
+from backend.inspector.defects4j_runner import Defects4JRunner, Defects4JError
+from backend.inspector.stacktrace_filter import (
     build_evidence_from_log,
     choose_best_frame,
     filter_and_rank_frames,
 )
-from inspector.source_utils import (
+from backend.inspector.source_utils import (
     SourceIndex,
     resolve_source_for_frame,
     extract_code_snippet,

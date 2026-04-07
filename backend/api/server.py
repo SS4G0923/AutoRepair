@@ -13,10 +13,22 @@ from urllib.parse import urlencode
 from flask import Flask, Response, jsonify, redirect, request, session, stream_with_context, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from auth_store import create_local_user, get_user_by_id, get_user_with_password, init_auth_db, normalize_email, upsert_oauth_user
-from chat_pipeline import ChatRequest, run_chat_pipeline
-from history_store import get_history_for_user, list_histories_for_user, save_history, soft_delete_history_for_user
-from repair_pipeline import RepairRequest, run_repair_pipeline
+from backend.auth.store import (
+    create_local_user,
+    get_user_by_id,
+    get_user_with_password,
+    init_auth_db,
+    normalize_email,
+    upsert_oauth_user,
+)
+from backend.chat.pipeline import ChatRequest, run_chat_pipeline
+from backend.history.store import (
+    get_history_for_user,
+    list_histories_for_user,
+    save_history,
+    soft_delete_history_for_user,
+)
+from backend.repair.pipeline import RepairRequest, run_repair_pipeline
 
 try:
     from dotenv import load_dotenv
@@ -673,4 +685,6 @@ def chat_stream() -> Response:
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=False, threaded=True)
+    from backend.app import main
+
+    main()

@@ -7,17 +7,17 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from inspector.inspector_prompt import build_planner_prompt
-from llm.agent_tools import RepairToolContext, build_repair_tools
-from llm import call_llm_for_json
-from project_workspace import (
+from backend.inspector.inspector_prompt import build_planner_prompt
+from backend.llm import call_llm_for_json
+from backend.llm.agent_tools import RepairToolContext, build_repair_tools
+from backend.repair.workspace import (
     ProjectFileInput,
     build_project_runtime_inspection_report,
     materialize_patched_workspace,
     normalize_project_path,
     prepare_project_workspace,
 )
-from sandbox import run_python_project_safely
+from backend.repair.sandbox import run_python_project_safely
 
 DEFAULT_MODEL = "qwen3.5-flash"
 MAX_CODE_CHARS = 100_000

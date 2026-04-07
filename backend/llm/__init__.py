@@ -13,9 +13,9 @@ def call_llm_for_json(
     tool_event_handler=None,
 ):
     if "gemini" in model.lower():
-        from llm.call_gemini import call_llm_for_json as provider_call
+        from backend.llm.call_gemini import call_llm_for_json as provider_call
     else:
-        from llm.call_gpt import call_llm_for_json as provider_call
+        from backend.llm.call_gpt import call_llm_for_json as provider_call
 
     kwargs = {
         "prompt": prompt,

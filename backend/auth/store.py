@@ -9,7 +9,8 @@ from pymysql.cursors import DictCursor
 
 
 BASE_DIR = Path(__file__).resolve().parent
-SCHEMA_PATH = (BASE_DIR / "SQL" / "auth_schema.sql").resolve()
+REPO_ROOT = BASE_DIR.parents[1]
+SCHEMA_PATH = (REPO_ROOT / "SQL" / "auth_schema.sql").resolve()
 
 
 def _mysql_settings(include_database: bool) -> dict[str, Any]:

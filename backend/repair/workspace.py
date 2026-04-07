@@ -324,7 +324,7 @@ def build_project_runtime_inspection_report(
     workspace: PreparedProjectWorkspace,
     execution: dict[str, Any],
 ) -> dict[str, Any]:
-    from sandbox import build_project_runtime_inspection_report as build_report
+    from backend.repair.sandbox import build_project_runtime_inspection_report as build_report
 
     return build_report(
         file_map=workspace.file_map,

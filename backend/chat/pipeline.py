@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from llm import call_llm_for_json
+from backend.llm import call_llm_for_json
 
 DEFAULT_CHAT_MODEL = "qwen3.5-plus"
 MAX_MESSAGES = 40
