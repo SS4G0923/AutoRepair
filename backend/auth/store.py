@@ -39,7 +39,7 @@ def _get_server_connection() -> pymysql.connections.Connection:
 
 def _iter_sql_files() -> list[Path]:
     sql_files = [path for path in SQL_DIR.glob("*.sql") if path.is_file()]
-    return sorted(sql_files, key=lambda path: (0 if path.name == "auth_schema.sql" else 1, path.name))
+    return sorted(sql_files, key=lambda path: (0 if path.name == "2026-04-01_initial_auth_schema.sql" else 1, path.name))
 
 
 def _split_sql_statements(sql_text: str) -> list[str]:
