@@ -28,7 +28,12 @@ import type {
 function App() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
   const [locale, setLocale] = useState<UiLocale>("zh");
-  const [theme, setTheme] = useState<ThemeMode>("dark");
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window === "undefined") {
+      return "dark";
+    }
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -135,17 +140,24 @@ function App() {
   }
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("autorepair-theme") as ThemeMode | null;
     const storedLocale = window.localStorage.getItem("autorepair-locale") as UiLocale | null;
-    const preferredDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setTheme(storedTheme ?? (preferredDark ? "dark" : "light"));
     setLocale(storedLocale ?? "zh");
   }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    window.localStorage.setItem("autorepair-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const applySystemTheme = () => {
+      setTheme(mediaQuery.matches ? "dark" : "light");
+    };
+
+    applySystemTheme();
+    mediaQuery.addEventListener("change", applySystemTheme);
+    return () => mediaQuery.removeEventListener("change", applySystemTheme);
+  }, []);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
