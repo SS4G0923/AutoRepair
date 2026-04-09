@@ -34,28 +34,21 @@ export function ChatWorkspace({
     <section
       className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow ${!isDesktopLayout ? "flex-1" : ""}`}
     >
-      <div className="shrink-0 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-[0.32em] text-slate-500 dark:text-white/40">
-            {copy.chatTitle}
-          </div>
-          <div className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-white/65">
-            {copy.chatHint}
-          </div>
+      <div className="shrink-0 flex items-center justify-between gap-3">
+        <div className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
+          {copy.chatTitle}
         </div>
-        <div className="flex flex-wrap gap-3">
-          <select
-            value={model}
-            onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
-            className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-          >
-            {modelOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {copy.model}: {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={model}
+          onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
+          className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+        >
+          {modelOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {copy.model}: {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="mt-3 min-h-0 flex-1 overflow-hidden rounded-[20px] border border-black/5 bg-black/[0.025] dark:border-white/10 dark:bg-white/[0.025]">
