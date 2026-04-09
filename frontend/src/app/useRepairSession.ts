@@ -226,13 +226,19 @@ export function useRepairSession({
 
     if (eventName === "code_report") {
       const diff = String(data.git_diff ?? "");
-      setFinalDiff(diff);
+      const report =
+        typeof data.report === "string" && data.report.trim()
+          ? data.report
+          : diff;
+      if (diff) {
+        setFinalDiff(diff);
+      }
       setStages((current) => ({
         ...current,
         code: {
           ...current.code,
           diff,
-          report: diff,
+          report,
         },
       }));
       return;
@@ -329,6 +335,10 @@ export function useRepairSession({
 
     if (eventName === "result") {
       const resultStatus = String(data.status ?? "");
+      const selectionSummary =
+        typeof data.selection_summary === "string" && data.selection_summary.trim()
+          ? data.selection_summary.trim()
+          : "";
       const passed =
         typeof data.verification_passed === "boolean"
           ? Boolean(data.verification_passed)
@@ -337,15 +347,20 @@ export function useRepairSession({
         resultStatus === "clean" ? null : resultStatus === "verified" ? true : passed ? true : false,
       );
       setFinalMessage(
-        resultStatus === "clean"
-          ? dict.cleanMessage
-          : resultStatus === "verified"
-            ? dict.verificationReady
-            : resultStatus === "verify_failed"
-              ? dict.verificationFailed
-              : typeof data.message === "string" && data.message
-                ? data.message
-                : dict.repairedMessage,
+        [
+          resultStatus === "clean"
+            ? dict.cleanMessage
+            : resultStatus === "verified"
+              ? dict.verificationReady
+              : resultStatus === "verify_failed"
+                ? dict.verificationFailed
+                : typeof data.message === "string" && data.message
+                  ? data.message
+                  : dict.repairedMessage,
+          selectionSummary,
+        ]
+          .filter(Boolean)
+          .join("\n"),
       );
       if (typeof data.git_diff === "string") {
         setFinalDiff(data.git_diff);

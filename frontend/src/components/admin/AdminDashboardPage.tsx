@@ -1,3 +1,4 @@
+import { formatCurrencyAmount, getPaymentMethodLabel } from "../../app/utils";
 import type { AppCopy } from "../../i18n";
 import type { AdminDashboardData } from "../../types";
 import {
@@ -63,7 +64,7 @@ export function AdminDashboardPage({ copy, data }: AdminDashboardPageProps) {
         <AdminMetricCard
           label={copy.adminDashboardTotalUsers}
           value={formatAdminNumber(data.summary.total_users)}
-          caption={`${copy.adminDashboardAdminUsers}: ${formatAdminNumber(data.summary.admin_users)}`}
+          caption={`${copy.adminDashboardAdminUsers}: ${formatAdminNumber(data.summary.admin_users)} · ${copy.adminRoleAdvanced}: ${formatAdminNumber(data.summary.advanced_users)}`}
           tone="sky"
         />
         <AdminMetricCard
@@ -83,6 +84,21 @@ export function AdminDashboardPage({ copy, data }: AdminDashboardPageProps) {
           value={formatAdminNumber(data.summary.total_tokens_7d)}
           caption={`${copy.adminDashboardFailed7d}: ${formatAdminNumber(data.summary.failed_requests_7d)}`}
           tone="rose"
+        />
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <AdminMetricCard
+          label={copy.billingPaidOrders}
+          value={formatAdminNumber(data.summary.paid_orders_30d)}
+          caption={copy.adminPaymentsTitle}
+          tone="emerald"
+        />
+        <AdminMetricCard
+          label={copy.adminRevenue30d}
+          value={formatCurrencyAmount(data.summary.paid_amount_cents_30d)}
+          caption={copy.adminPaymentsHint}
+          tone="amber"
         />
       </div>
 
@@ -196,6 +212,56 @@ export function AdminDashboardPage({ copy, data }: AdminDashboardPageProps) {
                   <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-white/45 sm:grid-cols-2">
                     <div>{copy.adminUserLabel}: {item.user_display_name || item.user_email || "-"}</div>
                     <div>{copy.adminRequestProvider}: {item.provider}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </AdminSurface>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[0.95fr_1.05fr]">
+        <AdminSurface>
+          <AdminSectionTitle
+            eyebrow={copy.adminPayments}
+            title={copy.adminDailyPayments}
+            hint={copy.adminPaymentsHint}
+          />
+          <div className="mt-4">
+            <DashboardBarList
+              emptyMessage={copy.adminNoData}
+              items={data.daily_payment_volume.map((item) => ({
+                label: item.day,
+                value: item.paid_amount_cents,
+                meta: `${formatCurrencyAmount(item.paid_amount_cents)} · ${formatAdminNumber(item.paid_orders)} ${copy.billingPaidOrders}`,
+              }))}
+            />
+          </div>
+        </AdminSurface>
+
+        <AdminSurface>
+          <AdminSectionTitle
+            eyebrow={copy.adminPayments}
+            title={copy.adminPaymentMethodMix}
+            hint={copy.adminRevenue30d}
+          />
+          <div className="mt-4 space-y-3">
+            {data.payment_method_usage.length === 0 ? (
+              <AdminEmptyState message={copy.adminNoData} />
+            ) : (
+              data.payment_method_usage.map((item) => (
+                <div
+                  key={item.payment_method}
+                  className="rounded-[20px] border border-black/5 bg-black/[0.02] px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium text-slate-900 dark:text-white">
+                      {getPaymentMethodLabel(copy, item.payment_method)}
+                    </div>
+                    <AdminBadge label={formatCurrencyAmount(item.paid_amount_cents)} tone="sky" />
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500 dark:text-white/45">
+                    {formatAdminNumber(item.paid_orders)} {copy.billingPaidOrders}
                   </div>
                 </div>
               ))

@@ -31,6 +31,14 @@ from backend.admin.store import (
     list_login_events_for_admin,
     list_users_for_admin,
 )
+from backend.billing.store import (
+    approve_payment_order,
+    complete_payment_order_in_sandbox,
+    create_payment_order_for_user,
+    get_billing_summary_for_user,
+    list_payment_orders_for_admin,
+    update_user_role_by_admin,
+)
 from backend.chat.pipeline import ChatRequest, run_chat_pipeline
 from backend.history.store import (
     get_history_for_user,
@@ -201,6 +209,24 @@ def _validate_login_payload(payload: dict[str, Any]) -> tuple[str, str]:
     return email, password
 
 
+def _validate_role_update_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
+    role = str(payload.get("role", "")).strip().lower()
+    note = str(payload.get("note", "")).strip() or None
+    if role not in {"basic", "advanced", "admin"}:
+        raise ValueError("`role` must be one of: basic, advanced, admin.")
+    return role, note
+
+
+def _validate_payment_order_payload(payload: dict[str, Any]) -> tuple[str, str]:
+    plan_code = str(payload.get("plan_code", "")).strip()
+    payment_method = str(payload.get("payment_method", "")).strip().lower()
+    if not plan_code:
+        raise ValueError("`plan_code` is required.")
+    if payment_method not in {"card", "paypal", "wechat", "alipay"}:
+        raise ValueError("`payment_method` must be one of: card, paypal, wechat, alipay.")
+    return plan_code, payment_method
+
+
 def _require_login(view_func):
     @wraps(view_func)
     def wrapped(*args, **kwargs):
@@ -261,6 +287,12 @@ def _ui_timestamp() -> str:
 def _event_summary(event: str, data: dict[str, Any]) -> str:
     if event == "stage":
         return f"{str(data.get('stage'))} · {str(data.get('status'))}"
+    if event == "candidate_status":
+        return (
+            f"{str(data.get('stage'))} · "
+            f"{str(data.get('candidate_label') or data.get('candidate_key') or 'candidate')} · "
+            f"{str(data.get('status'))}"
+        )
     if event == "error":
         return "error"
     if event == "result":
@@ -545,6 +577,34 @@ def admin_users() -> Response:
     return jsonify({"items": list_users_for_admin(limit=limit)})
 
 
+@app.route("/api/admin/users/<int:user_id>/role", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_user_role_update(user_id: int) -> Response:
+    admin_user = _current_user()
+    if admin_user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+
+    try:
+        role, note = _validate_role_update_payload(payload)
+        updated_user = update_user_role_by_admin(
+            target_user_id=user_id,
+            new_role=role,
+            admin_user_id=int(admin_user["id"]),
+            note=note,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    response_payload: dict[str, Any] = {"user": updated_user}
+    if int(admin_user["id"]) == user_id:
+        response_payload["current_user"] = updated_user
+    return jsonify(response_payload)
+
+
 @app.route("/api/admin/llm-requests", methods=["GET", "OPTIONS"])
 @_require_admin
 def admin_llm_requests() -> Response:
@@ -588,6 +648,132 @@ def admin_login_events() -> Response:
     page = request.args.get("page", default=1, type=int) or 1
     page_size = request.args.get("page_size", default=50, type=int) or 50
     return jsonify(list_login_events_for_admin(page=page, page_size=page_size))
+
+
+@app.route("/api/admin/payment-orders", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_payment_orders() -> Response:
+    page = request.args.get("page", default=1, type=int) or 1
+    page_size = request.args.get("page_size", default=25, type=int) or 25
+    status = request.args.get("status", default="", type=str) or ""
+    payment_method = request.args.get("payment_method", default="", type=str) or ""
+    query = request.args.get("q", default="", type=str) or ""
+    return jsonify(
+        list_payment_orders_for_admin(
+            page=page,
+            page_size=page_size,
+            status=status,
+            payment_method=payment_method,
+            query=query,
+        )
+    )
+
+
+@app.route("/api/admin/payment-orders/<int:order_id>/approve", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_payment_order_approve(order_id: int) -> Response:
+    admin_user = _current_user()
+    if admin_user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+    note = str(payload.get("note", "")).strip() or None
+    try:
+        order = approve_payment_order(
+            order_id=order_id,
+            admin_user_id=int(admin_user["id"]),
+            approve=True,
+            note=note,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"order": order})
+
+
+@app.route("/api/admin/payment-orders/<int:order_id>/reject", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_payment_order_reject(order_id: int) -> Response:
+    admin_user = _current_user()
+    if admin_user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+    note = str(payload.get("note", "")).strip() or None
+    try:
+        order = approve_payment_order(
+            order_id=order_id,
+            admin_user_id=int(admin_user["id"]),
+            approve=False,
+            note=note,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"order": order})
+
+
+@app.route("/api/billing/summary", methods=["GET", "OPTIONS"])
+@_require_login
+def billing_summary() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    payload = get_billing_summary_for_user(int(user["id"]))
+    payload["user"] = user
+    return jsonify(payload)
+
+
+@app.route("/api/billing/orders", methods=["POST", "OPTIONS"])
+@_require_login
+def billing_create_order() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if user.get("role") != "basic":
+        return jsonify({"error": "Only basic users can create upgrade orders."}), 400
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+
+    try:
+        plan_code, payment_method = _validate_payment_order_payload(payload)
+        order = create_payment_order_for_user(
+            user_id=int(user["id"]),
+            plan_code=plan_code,
+            payment_method=payment_method,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"order": order})
+
+
+@app.route("/api/billing/orders/<int:order_id>/sandbox-complete", methods=["POST", "OPTIONS"])
+@_require_login
+def billing_complete_sandbox(order_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    try:
+        payload = complete_payment_order_in_sandbox(user_id=int(user["id"]), order_id=order_id)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    refreshed_user = payload.get("user")
+    if isinstance(refreshed_user, dict):
+        _set_user_session(refreshed_user)
+    return jsonify(payload)
 
 
 @app.route("/api/repair/stream", methods=["POST", "OPTIONS"])
@@ -654,9 +840,11 @@ def repair_stream() -> Response:
             captured["stages"]["plan"]["report"] = str(outgoing.get("report", ""))
         elif event == "code_report":
             diff_text = str(outgoing.get("git_diff", ""))
-            captured["stages"]["code"]["report"] = diff_text
+            report_text = str(outgoing.get("report", diff_text))
+            captured["stages"]["code"]["report"] = report_text
             captured["stages"]["code"]["diff"] = diff_text
-            captured["final_diff"] = diff_text
+            if diff_text:
+                captured["final_diff"] = diff_text
         elif event == "verify_report":
             captured["stages"]["verify"]["report"] = json.dumps(
                 outgoing.get("report", {}),
@@ -699,6 +887,9 @@ def repair_stream() -> Response:
         elif event == "result":
             if outgoing.get("filename"):
                 captured["filename"] = str(outgoing.get("filename"))
+            if outgoing.get("git_diff"):
+                captured["final_diff"] = str(outgoing.get("git_diff"))
+                captured["stages"]["code"]["diff"] = str(outgoing.get("git_diff"))
             captured["final_status"] = str(outgoing.get("status", ""))
             if captured["final_status"] == "clean":
                 preview_text = "No runtime error detected."

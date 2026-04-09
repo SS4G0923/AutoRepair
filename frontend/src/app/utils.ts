@@ -1,4 +1,12 @@
-import type { AuthenticatedUser, StageName, StageState } from "../types";
+import type { AppCopy } from "../i18n";
+import type {
+  AuthenticatedUser,
+  PaymentMethodCode,
+  PaymentOrderStatus,
+  StageName,
+  StageState,
+  UserRole,
+} from "../types";
 
 export const SIDEBAR_WIDTH_STORAGE_KEY = "autorepair-sidebar-width";
 export const DEFAULT_SIDEBAR_WIDTH = 200;
@@ -43,6 +51,9 @@ export function fileToBase64(file: File) {
 export function buildSummary(event: string, data: Record<string, unknown>) {
   if (event === "stage") {
     return `${String(data.stage)} · ${String(data.status)}`;
+  }
+  if (event === "candidate_status") {
+    return `${String(data.stage)} · ${String(data.candidate_label ?? data.candidate_key ?? "candidate")} · ${String(data.status)}`;
   }
   if (event === "tool_event") {
     return `${String(data.stage)} · ${String(data.tool_name)} · ${String(data.status)}`;
@@ -195,4 +206,50 @@ export function getUserInitials(user: AuthenticatedUser) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
+}
+
+export function formatCurrencyAmount(amountCents: number, currency = "CNY") {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format((amountCents || 0) / 100);
+}
+
+export function getUserRoleLabel(copy: AppCopy, role: UserRole) {
+  if (role === "admin") {
+    return copy.adminRoleAdmin;
+  }
+  if (role === "advanced") {
+    return copy.adminRoleAdvanced;
+  }
+  return copy.adminRoleBasic;
+}
+
+export function getPaymentMethodLabel(copy: AppCopy, method: PaymentMethodCode) {
+  switch (method) {
+    case "paypal":
+      return copy.billingProviderPaypal;
+    case "wechat":
+      return copy.billingProviderWechat;
+    case "alipay":
+      return copy.billingProviderAlipay;
+    default:
+      return copy.billingProviderCard;
+  }
+}
+
+export function getPaymentStatusLabel(copy: AppCopy, status: PaymentOrderStatus) {
+  switch (status) {
+    case "paid":
+      return copy.billingStatusPaid;
+    case "rejected":
+      return copy.billingStatusRejected;
+    case "cancelled":
+      return copy.billingStatusCancelled;
+    case "failed":
+      return copy.billingStatusFailed;
+    default:
+      return copy.billingStatusPending;
+  }
 }

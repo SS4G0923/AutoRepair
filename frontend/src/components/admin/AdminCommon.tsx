@@ -51,6 +51,9 @@ export function toStatusTone(status: string | null | undefined): Tone {
   if (normalized.includes("admin")) {
     return "sky";
   }
+  if (normalized.includes("advanced")) {
+    return "amber";
+  }
   if (normalized.includes("success") || normalized.includes("completed") || normalized.includes("active")) {
     return "emerald";
   }

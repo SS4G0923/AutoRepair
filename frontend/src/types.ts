@@ -4,11 +4,13 @@ export type SessionStatus = "idle" | "streaming" | "done" | "error";
 export type StageName = "run" | "inspect" | "plan" | "code" | "verify";
 export type AuthMode = "login" | "register";
 export type OAuthProvider = "github" | "google";
-export type WorkspaceMode = "agent" | "chat" | "admin";
+export type WorkspaceMode = "agent" | "chat" | "admin" | "billing";
 export type AgentSourceType = "single_file" | "zip" | "github";
-export type UserRole = "basic" | "admin";
+export type UserRole = "basic" | "advanced" | "admin";
 export type AccountStatus = "active" | "suspended";
-export type AdminPage = "dashboard" | "users" | "requests" | "models" | "activity";
+export type AdminPage = "dashboard" | "users" | "requests" | "models" | "activity" | "payments";
+export type PaymentMethodCode = "card" | "paypal" | "wechat" | "alipay";
+export type PaymentOrderStatus = "pending" | "paid" | "rejected" | "cancelled" | "failed";
 
 export type CodeLanguage = "python" | "javascript" | "typescript" | "java" | "go";
 export type ModelOptionValue = string;
@@ -128,12 +130,15 @@ export interface HistoryDetail extends HistorySummary {
 export interface AdminDashboardSummary {
   total_users: number;
   admin_users: number;
+  advanced_users: number;
   new_users_7d: number;
   llm_requests_7d: number;
   chat_requests_7d: number;
   repair_requests_7d: number;
   failed_requests_7d: number;
   total_tokens_7d: number;
+  paid_orders_30d: number;
+  paid_amount_cents_30d: number;
 }
 
 export interface AdminDailyTokenUsage {
@@ -174,11 +179,25 @@ export interface AdminLatestRequestItem {
   total_tokens: number;
 }
 
+export interface AdminDailyPaymentVolume {
+  day: string;
+  paid_orders: number;
+  paid_amount_cents: number;
+}
+
+export interface AdminPaymentMethodUsageItem {
+  payment_method: PaymentMethodCode;
+  paid_orders: number;
+  paid_amount_cents: number;
+}
+
 export interface AdminDashboardData {
   summary: AdminDashboardSummary;
   daily_token_usage: AdminDailyTokenUsage[];
   daily_user_growth: AdminDailyUserGrowth[];
+  daily_payment_volume: AdminDailyPaymentVolume[];
   model_usage: AdminModelUsageItem[];
+  payment_method_usage: AdminPaymentMethodUsageItem[];
   latest_requests: AdminLatestRequestItem[];
 }
 
@@ -196,6 +215,8 @@ export interface AdminUserItem {
   history_count: number;
   llm_request_count: number;
   total_tokens: number;
+  payment_order_count: number;
+  active_subscription_plan: string | null;
 }
 
 export interface AdminLlmRequestItem {
@@ -287,4 +308,97 @@ export interface AdminLoginEventList {
   page: number;
   page_size: number;
   total: number;
+}
+
+export interface BillingPlan {
+  id: number;
+  plan_code: string;
+  plan_name: string;
+  role_granted: UserRole;
+  billing_cycle: string;
+  amount_cents: number;
+  currency: string;
+  description: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export interface BillingPaymentMethod {
+  code: PaymentMethodCode;
+  mode: "sandbox" | "manual" | "live";
+  is_configured: boolean;
+}
+
+export interface BillingSubscription {
+  id: number;
+  user_id: number;
+  plan_id: number;
+  plan_code: string;
+  plan_name: string;
+  role_granted: UserRole;
+  subscription_status: string;
+  started_at: string | null;
+  ends_at: string | null;
+  revoked_at: string | null;
+  activated_by_order_id: number | null;
+}
+
+export interface BillingOrderItem {
+  id: number;
+  order_no: string;
+  user_id: number;
+  plan_code: string;
+  plan_name: string;
+  target_role: UserRole;
+  amount_cents: number;
+  currency: string;
+  payment_method: PaymentMethodCode;
+  order_status: PaymentOrderStatus;
+  provider_status: string | null;
+  checkout_action: string;
+  checkout_url: string | null;
+  provider_reference: string | null;
+  session_status: string | null;
+  redirect_url: string | null;
+  qr_code_text: string | null;
+  instructions: string;
+  created_at: string;
+  updated_at: string;
+  paid_at: string | null;
+}
+
+export interface BillingOrderSummary {
+  total_orders: number;
+  paid_orders: number;
+  paid_amount_cents: number;
+}
+
+export interface BillingSummaryData {
+  payment_mode: "sandbox" | "manual" | "live";
+  plans: BillingPlan[];
+  payment_methods: BillingPaymentMethod[];
+  orders: BillingOrderItem[];
+  order_summary: BillingOrderSummary;
+  current_subscription: BillingSubscription | null;
+  user: AuthenticatedUser;
+}
+
+export interface AdminPaymentOrderItem extends BillingOrderItem {
+  user_email: string | null;
+  user_display_name: string | null;
+}
+
+export interface AdminPaymentOrderSummary {
+  total_orders: number;
+  pending_orders: number;
+  paid_orders: number;
+  paid_amount_cents: number;
+}
+
+export interface AdminPaymentOrderList {
+  items: AdminPaymentOrderItem[];
+  page: number;
+  page_size: number;
+  total: number;
+  summary: AdminPaymentOrderSummary;
 }

@@ -1,18 +1,20 @@
 import type { RefObject } from "react";
 import type { AppCopy } from "../../i18n";
-import { getUserInitials } from "../../app/utils";
+import { getUserInitials, getUserRoleLabel } from "../../app/utils";
 import type { AuthenticatedUser, ThemeMode } from "../../types";
-import { AdminIcon, LanguageIcon, MoonIcon, SunIcon } from "./AppIcons";
+import { AdminIcon, LanguageIcon, MoonIcon, PaymentIcon, SunIcon } from "./AppIcons";
 
 interface AppHeaderProps {
   canAccessAdmin: boolean;
   currentUser: AuthenticatedUser | null;
   copy: AppCopy;
+  showUpgrade: boolean;
   theme: ThemeMode;
   userMenuOpen: boolean;
   userMenuRef: RefObject<HTMLDivElement>;
   onLogout: () => void;
   onOpenAdmin: () => void;
+  onOpenBilling: () => void;
   onToggleLocale: () => void;
   onToggleTheme: () => void;
   onToggleUserMenu: () => void;
@@ -22,11 +24,13 @@ export function AppHeader({
   canAccessAdmin,
   currentUser,
   copy,
+  showUpgrade,
   theme,
   userMenuOpen,
   userMenuRef,
   onLogout,
   onOpenAdmin,
+  onOpenBilling,
   onToggleLocale,
   onToggleTheme,
   onToggleUserMenu,
@@ -44,6 +48,15 @@ export function AppHeader({
       )}
 
       <div className="flex justify-end gap-3">
+        {showUpgrade ? (
+          <button
+            onClick={onOpenBilling}
+            className="flex h-11 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
+          >
+            <PaymentIcon />
+            <span>{copy.billingOpen}</span>
+          </button>
+        ) : null}
         <button
           onClick={onToggleLocale}
           aria-label={copy.locale}
@@ -94,7 +107,7 @@ export function AppHeader({
                     {currentUser.email}
                   </div>
                   <div className="mt-2 inline-flex rounded-full bg-black/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-white/[0.05] dark:text-white/55">
-                    {currentUser.role === "admin" ? copy.adminRoleAdmin : copy.adminRoleBasic}
+                    {getUserRoleLabel(copy, currentUser.role)}
                   </div>
                 </div>
 

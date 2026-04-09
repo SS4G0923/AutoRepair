@@ -7,6 +7,7 @@ import {
   ChatIcon,
   DashboardIcon,
   ModelsIcon,
+  PaymentIcon,
   RequestsIcon,
   TrashIcon,
   UsersIcon,
@@ -82,6 +83,12 @@ export function AppSidebar({
       label: copy.adminActivity,
       hint: copy.adminActivityHint,
       icon: ActivityIcon,
+    },
+    {
+      page: "payments",
+      label: copy.adminPayments,
+      hint: copy.adminPaymentsHint,
+      icon: PaymentIcon,
     },
   ];
 

@@ -1,5 +1,6 @@
 import { stageLabels } from "../i18n";
 import type { StageName, StageState, UiLocale } from "../types";
+import { CandidateRankingPanel } from "./CandidateRankingPanel";
 import { ThinkingDots } from "./ThinkingDots";
 
 interface StageCardProps {
@@ -62,9 +63,12 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
           <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
             {copy.reportLabel}
           </div>
-          <pre className="overflow-y-auto whitespace-pre-wrap break-words rounded-3xl border border-black/5 bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/65">
-            {reportContent}
-          </pre>
+          <CandidateRankingPanel locale={locale} reportContent={reportContent} stage={stage} />
+          {!reportContent.includes("\"collaboration_mode\": \"multi_candidate_patch_committee\"") ? (
+            <pre className="overflow-y-auto whitespace-pre-wrap break-words rounded-3xl border border-black/5 bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/65">
+              {reportContent}
+            </pre>
+          ) : null}
         </div>
       ) : null}
 

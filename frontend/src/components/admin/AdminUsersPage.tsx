@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
+import { getUserRoleLabel } from "../../app/utils";
 import type { AppCopy } from "../../i18n";
-import type { AdminUserItem } from "../../types";
+import type { AdminUserItem, UserRole } from "../../types";
 import {
   AdminBadge,
   AdminEmptyState,
@@ -15,19 +17,36 @@ import {
 interface AdminUsersPageProps {
   copy: AppCopy;
   users: AdminUserItem[];
+  updatingUserId: number | null;
+  onUpdateUserRole: (userId: number, role: UserRole) => void;
 }
 
-export function AdminUsersPage({ copy, users }: AdminUsersPageProps) {
+export function AdminUsersPage({
+  copy,
+  users,
+  updatingUserId,
+  onUpdateUserRole,
+}: AdminUsersPageProps) {
+  const [roleDrafts, setRoleDrafts] = useState<Record<number, UserRole>>({});
   const adminCount = users.filter((item) => item.role === "admin").length;
-  const totalRequests = users.reduce((sum, item) => sum + item.llm_request_count, 0);
+  const advancedCount = users.filter((item) => item.role === "advanced").length;
   const totalTokens = users.reduce((sum, item) => sum + item.total_tokens, 0);
+
+  useEffect(() => {
+    setRoleDrafts(
+      users.reduce<Record<number, UserRole>>((accumulator, user) => {
+        accumulator[user.id] = user.role;
+        return accumulator;
+      }, {}),
+    );
+  }, [users]);
 
   return (
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <AdminMetricCard label={copy.adminUsers} value={formatAdminNumber(users.length)} tone="sky" />
         <AdminMetricCard label={copy.adminDashboardAdminUsers} value={formatAdminNumber(adminCount)} tone="emerald" />
-        <AdminMetricCard label={copy.adminRequestCount} value={formatAdminNumber(totalRequests)} tone="amber" />
+        <AdminMetricCard label={copy.adminRoleAdvanced} value={formatAdminNumber(advancedCount)} tone="amber" />
         <AdminMetricCard label={copy.adminTokens} value={formatAdminNumber(totalTokens)} tone="rose" />
       </div>
 
@@ -52,6 +71,8 @@ export function AdminUsersPage({ copy, users }: AdminUsersPageProps) {
                   <th className="px-3 py-3">{copy.adminLastLogin}</th>
                   <th className="px-3 py-3">{copy.adminHistoryCount}</th>
                   <th className="px-3 py-3">{copy.adminRequestCount}</th>
+                  <th className="px-3 py-3">{copy.adminPaymentOrderCount}</th>
+                  <th className="px-3 py-3">{copy.adminActivePlan}</th>
                   <th className="px-3 py-3">{copy.adminTokens}</th>
                 </tr>
               </thead>
@@ -85,10 +106,32 @@ export function AdminUsersPage({ copy, users }: AdminUsersPageProps) {
                       </div>
                     </td>
                     <td className="px-3 py-3">
-                      <AdminBadge
-                        label={user.role === "admin" ? copy.adminRoleAdmin : copy.adminRoleBasic}
-                        tone={toStatusTone(user.role)}
-                      />
+                      <div className="flex min-w-[11rem] flex-col gap-2">
+                        <AdminBadge label={getUserRoleLabel(copy, user.role)} tone={toStatusTone(user.role)} />
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={roleDrafts[user.id] ?? user.role}
+                            onChange={(event) =>
+                              setRoleDrafts((current) => ({
+                                ...current,
+                                [user.id]: event.target.value as UserRole,
+                              }))
+                            }
+                            className="min-w-0 flex-1 rounded-[14px] border border-black/10 bg-white/70 px-3 py-2 text-xs text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                          >
+                            <option value="basic">{copy.adminRoleBasic}</option>
+                            <option value="advanced">{copy.adminRoleAdvanced}</option>
+                            <option value="admin">{copy.adminRoleAdmin}</option>
+                          </select>
+                          <button
+                            onClick={() => onUpdateUserRole(user.id, roleDrafts[user.id] ?? user.role)}
+                            disabled={updatingUserId === user.id || (roleDrafts[user.id] ?? user.role) === user.role}
+                            className="rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
+                          >
+                            {updatingUserId === user.id ? copy.adminUpdatingRole : copy.adminSaveRole}
+                          </button>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-3 py-3">
                       <AdminBadge
@@ -105,6 +148,8 @@ export function AdminUsersPage({ copy, users }: AdminUsersPageProps) {
                     <td className="px-3 py-3">{formatAdminDateTime(user.last_login_at)}</td>
                     <td className="px-3 py-3">{formatAdminNumber(user.history_count)}</td>
                     <td className="px-3 py-3">{formatAdminNumber(user.llm_request_count)}</td>
+                    <td className="px-3 py-3">{formatAdminNumber(user.payment_order_count)}</td>
+                    <td className="px-3 py-3">{user.active_subscription_plan || "-"}</td>
                     <td className="px-3 py-3">{formatAdminNumber(user.total_tokens)}</td>
                   </tr>
                 ))}

@@ -21,27 +21,36 @@ def list_users_for_admin(*, limit: int = 200) -> list[dict[str, Any]]:
                     u.created_at,
                     u.updated_at,
                     u.last_login_at,
-                    COUNT(DISTINCT ch.id) AS history_count,
-                    COUNT(DISTINCT lr.id) AS llm_request_count,
-                    COALESCE(SUM(lt.total_tokens), 0) AS total_tokens
+                    (
+                        SELECT COUNT(*)
+                        FROM conversation_histories ch
+                        WHERE ch.user_id = u.id AND ch.deleted_at IS NULL
+                    ) AS history_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM llm_requests lr
+                        WHERE lr.user_id = u.id
+                    ) AS llm_request_count,
+                    (
+                        SELECT COALESCE(SUM(lt.total_tokens), 0)
+                        FROM llm_requests lr
+                        LEFT JOIN llm_token_usage lt ON lt.request_id = lr.id
+                        WHERE lr.user_id = u.id
+                    ) AS total_tokens,
+                    (
+                        SELECT COUNT(*)
+                        FROM payment_orders po
+                        WHERE po.user_id = u.id
+                    ) AS payment_order_count,
+                    (
+                        SELECT sp.plan_name
+                        FROM user_subscriptions us
+                        INNER JOIN subscription_plans sp ON sp.id = us.plan_id
+                        WHERE us.user_id = u.id AND us.subscription_status = 'active'
+                        ORDER BY us.id DESC
+                        LIMIT 1
+                    ) AS active_subscription_plan
                 FROM users u
-                LEFT JOIN conversation_histories ch
-                    ON ch.user_id = u.id AND ch.deleted_at IS NULL
-                LEFT JOIN llm_requests lr
-                    ON lr.user_id = u.id
-                LEFT JOIN llm_token_usage lt
-                    ON lt.request_id = lr.id
-                GROUP BY
-                    u.id,
-                    u.email,
-                    u.display_name,
-                    u.avatar_url,
-                    u.auth_source,
-                    u.role,
-                    u.account_status,
-                    u.created_at,
-                    u.updated_at,
-                    u.last_login_at
                 ORDER BY u.created_at DESC, u.id DESC
                 LIMIT %s
                 """,
@@ -63,6 +72,8 @@ def list_users_for_admin(*, limit: int = 200) -> list[dict[str, Any]]:
             "history_count": int(row["history_count"] or 0),
             "llm_request_count": int(row["llm_request_count"] or 0),
             "total_tokens": int(row["total_tokens"] or 0),
+            "payment_order_count": int(row["payment_order_count"] or 0),
+            "active_subscription_plan": row["active_subscription_plan"],
         }
         for row in rows
     ]
@@ -76,6 +87,7 @@ def get_admin_dashboard() -> dict[str, Any]:
                 SELECT
                     COUNT(*) AS total_users,
                     SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) AS admin_users,
+                    SUM(CASE WHEN role = 'advanced' THEN 1 ELSE 0 END) AS advanced_users,
                     SUM(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS new_users_7d
                 FROM users
                 """
@@ -96,6 +108,17 @@ def get_admin_dashboard() -> dict[str, Any]:
                 """
             )
             request_summary = cursor.fetchone() or {}
+
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS paid_orders_30d,
+                    COALESCE(SUM(amount_cents), 0) AS paid_amount_cents_30d
+                FROM payment_orders
+                WHERE order_status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                """
+            )
+            payment_summary = cursor.fetchone() or {}
 
             cursor.execute(
                 """
@@ -152,6 +175,28 @@ def get_admin_dashboard() -> dict[str, Any]:
             cursor.execute(
                 """
                 SELECT
+                    DATE(paid_at) AS day,
+                    COUNT(*) AS paid_orders,
+                    COALESCE(SUM(amount_cents), 0) AS paid_amount_cents
+                FROM payment_orders
+                WHERE order_status = 'paid'
+                  AND paid_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY)
+                GROUP BY DATE(paid_at)
+                ORDER BY day ASC
+                """
+            )
+            daily_payment_volume = [
+                {
+                    "day": str(row["day"]),
+                    "paid_orders": int(row["paid_orders"] or 0),
+                    "paid_amount_cents": int(row["paid_amount_cents"] or 0),
+                }
+                for row in (cursor.fetchall() or [])
+            ]
+
+            cursor.execute(
+                """
+                SELECT
                     lr.model,
                     lr.provider,
                     COUNT(*) AS request_count,
@@ -174,6 +219,28 @@ def get_admin_dashboard() -> dict[str, Any]:
                     "total_tokens": int(row["total_tokens"] or 0),
                     "avg_latency_ms": float(row["avg_latency_ms"] or 0),
                     "last_used_at": str(row["last_used_at"]) if row["last_used_at"] else None,
+                }
+                for row in (cursor.fetchall() or [])
+            ]
+
+            cursor.execute(
+                """
+                SELECT
+                    payment_method,
+                    COUNT(*) AS paid_orders,
+                    COALESCE(SUM(amount_cents), 0) AS paid_amount_cents
+                FROM payment_orders
+                WHERE order_status = 'paid'
+                  AND paid_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                GROUP BY payment_method
+                ORDER BY paid_amount_cents DESC, paid_orders DESC
+                """
+            )
+            payment_method_usage = [
+                {
+                    "payment_method": row["payment_method"],
+                    "paid_orders": int(row["paid_orders"] or 0),
+                    "paid_amount_cents": int(row["paid_amount_cents"] or 0),
                 }
                 for row in (cursor.fetchall() or [])
             ]
@@ -222,16 +289,21 @@ def get_admin_dashboard() -> dict[str, Any]:
         "summary": {
             "total_users": int(user_summary.get("total_users") or 0),
             "admin_users": int(user_summary.get("admin_users") or 0),
+            "advanced_users": int(user_summary.get("advanced_users") or 0),
             "new_users_7d": int(user_summary.get("new_users_7d") or 0),
             "llm_requests_7d": int(request_summary.get("llm_requests_7d") or 0),
             "chat_requests_7d": int(request_summary.get("chat_requests_7d") or 0),
             "repair_requests_7d": int(request_summary.get("repair_requests_7d") or 0),
             "failed_requests_7d": int(request_summary.get("failed_requests_7d") or 0),
             "total_tokens_7d": int(request_summary.get("total_tokens_7d") or 0),
+            "paid_orders_30d": int(payment_summary.get("paid_orders_30d") or 0),
+            "paid_amount_cents_30d": int(payment_summary.get("paid_amount_cents_30d") or 0),
         },
         "daily_token_usage": daily_token_usage,
         "daily_user_growth": daily_user_growth,
+        "daily_payment_volume": daily_payment_volume,
         "model_usage": model_usage,
+        "payment_method_usage": payment_method_usage,
         "latest_requests": latest_requests,
     }
 

@@ -171,6 +171,21 @@ def touch_user_last_login(user_id: int) -> None:
         connection.commit()
 
 
+def update_user_role(user_id: int, role: str) -> dict[str, Any] | None:
+    with get_db_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE users
+                SET role = %s
+                WHERE id = %s
+                """,
+                (role, user_id),
+            )
+        connection.commit()
+    return get_user_by_id(user_id)
+
+
 def record_login_event(
     *,
     user_id: int | None,

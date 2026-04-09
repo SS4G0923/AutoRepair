@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { AdminRequestFilters } from "../../app/useAdminConsole";
+import type { AdminPaymentFilters, AdminRequestFilters } from "../../app/useAdminConsole";
 import type { AppCopy } from "../../i18n";
 import type {
   AdminDashboardData,
@@ -7,12 +7,14 @@ import type {
   AdminLlmRequestDetail,
   AdminLlmRequestList,
   AdminModelUsageReport,
+  AdminPaymentOrderList,
   AdminPage,
   AdminUserItem,
 } from "../../types";
 import { AdminActivityPage } from "./AdminActivityPage";
 import { AdminDashboardPage } from "./AdminDashboardPage";
 import { AdminModelsPage } from "./AdminModelsPage";
+import { AdminPaymentsPage } from "./AdminPaymentsPage";
 import { AdminRequestsPage } from "./AdminRequestsPage";
 import { AdminUsersPage } from "./AdminUsersPage";
 
@@ -21,11 +23,15 @@ interface AdminWorkspaceProps {
   adminError: string;
   adminLoading: boolean;
   adminPage: AdminPage;
+  adminPaymentActingOrderId: number | null;
+  adminUserRoleUpdatingId: number | null;
   copy: AppCopy;
   dashboardData: AdminDashboardData | null;
   loginEvents: AdminLoginEventList | null;
   modelUsage: AdminModelUsageReport | null;
   modelUsageDays: number;
+  paymentFilters: AdminPaymentFilters;
+  paymentOrders: AdminPaymentOrderList | null;
   requestDetail: AdminLlmRequestDetail | null;
   requestDetailLoading: boolean;
   requestFilters: AdminRequestFilters;
@@ -35,9 +41,13 @@ interface AdminWorkspaceProps {
   workspaceMainClass: string;
   onActivityPageChange: (page: number) => void;
   onModelUsageDaysChange: (days: number) => void;
+  onApprovePaymentOrder: (orderId: number) => void;
+  onPaymentFiltersChange: Dispatch<SetStateAction<AdminPaymentFilters>>;
   onRefresh: () => void;
   onRequestFiltersChange: Dispatch<SetStateAction<AdminRequestFilters>>;
   onSelectRequest: (requestId: number) => void;
+  onUpdateUserRole: (userId: number, role: AdminUserItem["role"]) => void;
+  onRejectPaymentOrder: (orderId: number) => void;
 }
 
 export function AdminWorkspace({
@@ -45,11 +55,15 @@ export function AdminWorkspace({
   adminError,
   adminLoading,
   adminPage,
+  adminPaymentActingOrderId,
+  adminUserRoleUpdatingId,
   copy,
   dashboardData,
   loginEvents,
   modelUsage,
   modelUsageDays,
+  paymentFilters,
+  paymentOrders,
   requestDetail,
   requestDetailLoading,
   requestFilters,
@@ -59,9 +73,13 @@ export function AdminWorkspace({
   workspaceMainClass,
   onActivityPageChange,
   onModelUsageDaysChange,
+  onApprovePaymentOrder,
+  onPaymentFiltersChange,
   onRefresh,
   onRequestFiltersChange,
   onSelectRequest,
+  onUpdateUserRole,
+  onRejectPaymentOrder,
 }: AdminWorkspaceProps) {
   const pageMeta: Record<AdminPage, { eyebrow: string; title: string; hint: string }> = {
     dashboard: {
@@ -88,6 +106,11 @@ export function AdminWorkspace({
       eyebrow: copy.adminActivity,
       title: copy.adminActivityTitle,
       hint: copy.adminActivityHint,
+    },
+    payments: {
+      eyebrow: copy.adminPayments,
+      title: copy.adminPaymentsTitle,
+      hint: copy.adminPaymentsHint,
     },
   };
 
@@ -132,7 +155,12 @@ export function AdminWorkspace({
         {adminPage === "dashboard" ? (
           <AdminDashboardPage copy={copy} data={dashboardData} />
         ) : adminPage === "users" ? (
-          <AdminUsersPage copy={copy} users={users} />
+          <AdminUsersPage
+            copy={copy}
+            users={users}
+            updatingUserId={adminUserRoleUpdatingId}
+            onUpdateUserRole={onUpdateUserRole}
+          />
         ) : adminPage === "requests" ? (
           <AdminRequestsPage
             copy={copy}
@@ -150,6 +178,16 @@ export function AdminWorkspace({
             days={modelUsageDays}
             modelUsage={modelUsage}
             onDaysChange={onModelUsageDaysChange}
+          />
+        ) : adminPage === "payments" ? (
+          <AdminPaymentsPage
+            actingOrderId={adminPaymentActingOrderId}
+            copy={copy}
+            filters={paymentFilters}
+            orders={paymentOrders}
+            setFilters={onPaymentFiltersChange}
+            onApprove={onApprovePaymentOrder}
+            onReject={onRejectPaymentOrder}
           />
         ) : (
           <AdminActivityPage

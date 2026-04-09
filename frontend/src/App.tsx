@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAdminConsole } from "./app/useAdminConsole";
+import { useBillingCenter } from "./app/useBillingCenter";
 import { useChatSession } from "./app/useChatSession";
 import { useRepairSession } from "./app/useRepairSession";
 import { useSidebarLayout } from "./app/useSidebarLayout";
@@ -10,6 +11,7 @@ import { AgentWorkspace } from "./components/app/AgentWorkspace";
 import { AppHeader } from "./components/app/AppHeader";
 import { AppSidebar } from "./components/app/AppSidebar";
 import { ChatWorkspace } from "./components/app/ChatWorkspace";
+import { BillingWorkspace } from "./components/billing/BillingWorkspace";
 import { copy, modelOptions } from "./i18n";
 import type {
   AdminPage,
@@ -62,6 +64,7 @@ function App() {
   const dict = copy[locale];
   const activeModel = modelOptions.find((item) => item.value === model) ?? modelOptions[0];
   const canAccessAdmin = currentUser?.role === "admin";
+  const showUpgrade = currentUser?.role === "basic";
 
   const repair = useRepairSession({
     apiBaseUrl,
@@ -83,6 +86,13 @@ function App() {
   const admin = useAdminConsole({
     apiBaseUrl,
     enabled: Boolean(currentUser && canAccessAdmin && workspaceMode === "admin"),
+    refreshSession: refreshSessionState,
+  });
+
+  const billing = useBillingCenter({
+    apiBaseUrl,
+    enabled: Boolean(currentUser && workspaceMode === "billing"),
+    refreshSession: refreshSessionState,
   });
 
   function upsertHistoryItem(summary: HistorySummary) {
@@ -100,6 +110,14 @@ function App() {
     setCurrentUser(data.authenticated ? (data.user as AuthenticatedUser) : null);
     setOauthProviders((data.oauth_providers ?? []) as OAuthProvider[]);
     return Boolean(data.authenticated);
+  }
+
+  async function refreshSessionState() {
+    try {
+      await fetchSession();
+    } catch {
+      return;
+    }
   }
 
   async function fetchHistoryList() {
@@ -300,6 +318,15 @@ function App() {
     admin.refreshAdminData();
   }
 
+  function openBillingCenter() {
+    if (!currentUser) {
+      return;
+    }
+    setUserMenuOpen(false);
+    setWorkspaceMode("billing");
+    void billing.refreshBillingData();
+  }
+
   function selectAdminPage(page: AdminPage) {
     if (!canAccessAdmin) {
       return;
@@ -408,11 +435,13 @@ function App() {
           canAccessAdmin={Boolean(canAccessAdmin)}
           currentUser={currentUser}
           copy={dict}
+          showUpgrade={Boolean(showUpgrade)}
           theme={theme}
           userMenuOpen={userMenuOpen}
           userMenuRef={userMenuRef}
           onLogout={handleLogout}
           onOpenAdmin={openAdminConsole}
+          onOpenBilling={openBillingCenter}
           onToggleLocale={() => setLocale((current) => (current === "zh" ? "en" : "zh"))}
           onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           onToggleUserMenu={() => setUserMenuOpen((current) => !current)}
@@ -508,11 +537,15 @@ function App() {
                   adminError={admin.adminError}
                   adminLoading={admin.adminLoading}
                   adminPage={admin.adminPage}
+                  adminPaymentActingOrderId={admin.adminPaymentActingOrderId}
+                  adminUserRoleUpdatingId={admin.adminUserRoleUpdatingId}
                   copy={dict}
                   dashboardData={admin.dashboardData}
                   loginEvents={admin.loginEvents}
                   modelUsage={admin.modelUsage}
                   modelUsageDays={admin.modelUsageDays}
+                  paymentFilters={admin.paymentFilters}
+                  paymentOrders={admin.paymentOrders}
                   requestDetail={admin.requestDetail}
                   requestDetailLoading={admin.requestDetailLoading}
                   requestFilters={admin.requestFilters}
@@ -522,9 +555,36 @@ function App() {
                   workspaceMainClass={workspaceMainClass}
                   onActivityPageChange={admin.setActivityPage}
                   onModelUsageDaysChange={admin.setModelUsageDays}
+                  onApprovePaymentOrder={(orderId) => {
+                    void admin.approvePaymentOrder(orderId);
+                  }}
+                  onPaymentFiltersChange={admin.setPaymentFilters}
                   onRefresh={admin.refreshAdminData}
                   onRequestFiltersChange={admin.setRequestFilters}
                   onSelectRequest={admin.setSelectedRequestId}
+                  onUpdateUserRole={(userId, role) => {
+                    void admin.updateUserRole(userId, role);
+                  }}
+                  onRejectPaymentOrder={(orderId) => {
+                    void admin.rejectPaymentOrder(orderId);
+                  }}
+                />
+              ) : workspaceMode === "billing" ? (
+                <BillingWorkspace
+                  activeOrderId={billing.activeOrderId}
+                  billingActing={billing.billingActing}
+                  billingData={billing.billingData}
+                  billingError={billing.billingError}
+                  billingLoading={billing.billingLoading}
+                  copy={dict}
+                  currentUser={currentUser}
+                  workspaceMainClass={workspaceMainClass}
+                  onCompleteSandboxOrder={billing.completeSandboxOrder}
+                  onCreateOrder={billing.createOrder}
+                  onRefresh={() => {
+                    void billing.refreshBillingData();
+                  }}
+                  onSelectOrder={billing.setActiveOrderId}
                 />
               ) : workspaceMode === "agent" ? (
                 <AgentWorkspace
