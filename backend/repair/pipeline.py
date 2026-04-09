@@ -4,7 +4,7 @@ import ast
 import difflib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from backend.inspector.inspector_prompt import build_planner_prompt
@@ -107,6 +107,68 @@ VERIFY_EXPLAIN_SYSTEM_PROMPT = """你是一个优秀的代码修复验证工程�
 直接输出正文，不要添加开场白和结束语。"""
 
 EventEmitter = Callable[[str, dict[str, Any]], None]
+
+
+@dataclass(frozen=True)
+class PatchCandidateProfile:
+    key: str
+    label: str
+    instructions: str
+
+
+@dataclass
+class PatchCandidateResult:
+    index: int
+    key: str
+    label: str
+    instructions: str
+    raw_output: str = ""
+    git_diff: str = ""
+    modified_files: list[str] = field(default_factory=list)
+    changed_file_count: int = 0
+    added_lines: int = 0
+    removed_lines: int = 0
+    diff_line_count: int = 0
+    patched_files: dict[str, str] = field(default_factory=dict)
+    patched_execution: Any | None = None
+    verification_execution: Any | None = None
+    verification_stdout: str = ""
+    verification_stderr: str = ""
+    verification_report: dict[str, Any] | None = None
+    verification_base_mode: str | None = None
+    skipped_top_level_nodes: list[str] = field(default_factory=list)
+    verify_passed: bool = False
+    score: int = 0
+    error_message: str | None = None
+    rank: int = 0
+
+
+PATCH_CANDIDATE_PROFILES: tuple[PatchCandidateProfile, ...] = (
+    PatchCandidateProfile(
+        key="minimal_hotfix",
+        label="Minimal Hotfix Agent",
+        instructions=(
+            "Prioritize the smallest safe change that directly fixes the observed failure. "
+            "Avoid refactors and touch as few lines and files as possible."
+        ),
+    ),
+    PatchCandidateProfile(
+        key="root_cause_agent",
+        label="Root Cause Agent",
+        instructions=(
+            "Prioritize a durable fix for the underlying root cause, even if it requires a small helper change "
+            "or a narrowly scoped cross-file edit."
+        ),
+    ),
+    PatchCandidateProfile(
+        key="defensive_guard_agent",
+        label="Defensive Guard Agent",
+        instructions=(
+            "Prioritize resilience and edge-case handling around the failure path while keeping behavior changes small "
+            "and backwards compatible."
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -758,18 +820,179 @@ def _stream_explain(
     return explain_text
 
 
-def _build_tool_event_handler(emit: EventEmitter, stage: str) -> Callable[[str, dict[str, Any]], None]:
+def _build_tool_event_handler(
+    emit: EventEmitter,
+    stage: str,
+    *,
+    candidate_label: str | None = None,
+) -> Callable[[str, dict[str, Any]], None]:
     def on_tool_event(status: str, payload: dict[str, Any]) -> None:
+        next_payload = dict(payload)
+        if candidate_label:
+            tool_name = str(next_payload.get("tool_name") or "tool")
+            next_payload["tool_name"] = f"{candidate_label}: {tool_name}"
         emit(
             "tool_event",
             {
                 "stage": stage,
                 "status": status,
-                **payload,
+                **next_payload,
             },
         )
 
     return on_tool_event
+
+
+def _count_diff_lines(git_diff: str) -> tuple[int, int]:
+    added = 0
+    removed = 0
+    for line in git_diff.splitlines():
+        if line.startswith("+++ ") or line.startswith("--- "):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return added, removed
+
+
+def _summarize_candidate(candidate: PatchCandidateResult, *, include_details: bool = False) -> dict[str, Any]:
+    summary = {
+        "rank": candidate.rank,
+        "candidate_key": candidate.key,
+        "candidate_label": candidate.label,
+        "strategy": candidate.instructions,
+        "score": candidate.score,
+        "verify_passed": candidate.verify_passed,
+        "changed_file_count": candidate.changed_file_count,
+        "modified_files": candidate.modified_files,
+        "added_lines": candidate.added_lines,
+        "removed_lines": candidate.removed_lines,
+        "diff_line_count": candidate.diff_line_count,
+        "verification_summary": (
+            candidate.verification_report.get("summary")
+            if isinstance(candidate.verification_report, dict)
+            else None
+        ),
+        "assert_count": (
+            int(candidate.verification_report.get("assert_count") or 0)
+            if isinstance(candidate.verification_report, dict)
+            else 0
+        ),
+        "error_message": candidate.error_message,
+    }
+    if include_details:
+        summary["git_diff"] = candidate.git_diff
+        summary["verification_report"] = candidate.verification_report
+        summary["patched_execution"] = (
+            candidate.patched_execution.to_dict() if candidate.patched_execution is not None else None
+        )
+        summary["verification_execution"] = (
+            candidate.verification_execution.to_dict()
+            if candidate.verification_execution is not None
+            else None
+        )
+        summary["verification_stdout"] = candidate.verification_stdout
+        summary["verification_stderr"] = candidate.verification_stderr
+        summary["verification_base_mode"] = candidate.verification_base_mode
+        summary["skipped_top_level_nodes"] = candidate.skipped_top_level_nodes
+    return summary
+
+
+def _build_candidate_generation_report(
+    candidates: list[PatchCandidateResult],
+    *,
+    provisional_leader: PatchCandidateResult | None,
+) -> str:
+    payload = {
+        "collaboration_mode": "multi_candidate_patch_committee",
+        "selection_policy": (
+            "Specialized coder agents generated multiple patch candidates. "
+            "A later verification stage will execute, score, rank, and auto-select the best candidate."
+        ),
+        "candidate_count": len(candidates),
+        "provisional_leader": (
+            {
+                "candidate_key": provisional_leader.key,
+                "candidate_label": provisional_leader.label,
+            }
+            if provisional_leader is not None
+            else None
+        ),
+        "candidates": [
+            {
+                "candidate_key": candidate.key,
+                "candidate_label": candidate.label,
+                "strategy": candidate.instructions,
+                "generated_diff": bool(candidate.git_diff),
+                "changed_file_count": candidate.changed_file_count,
+                "modified_files": candidate.modified_files,
+                "added_lines": candidate.added_lines,
+                "removed_lines": candidate.removed_lines,
+                "error_message": candidate.error_message,
+            }
+            for candidate in candidates
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _score_candidate(candidate: PatchCandidateResult) -> int:
+    score = 0
+    if candidate.git_diff:
+        score += 20
+    if candidate.patched_execution is not None:
+        if candidate.patched_execution.ok:
+            score += 40
+        elif candidate.patched_execution.timed_out:
+            score -= 18
+        else:
+            score -= 8
+    if candidate.verification_report is not None:
+        score += min(int(candidate.verification_report.get("assert_count") or 0), 6)
+    if candidate.verification_execution is not None:
+        if candidate.verification_execution.ok:
+            score += 34
+        elif candidate.verification_execution.timed_out:
+            score -= 18
+        else:
+            score -= 10
+    if candidate.verify_passed:
+        score += 25
+    score -= max(0, candidate.changed_file_count - 1) * 3
+    score -= min(candidate.diff_line_count, 120) // 12
+    if candidate.error_message:
+        score -= 20
+    return score
+
+
+def _rank_candidates(candidates: list[PatchCandidateResult]) -> list[PatchCandidateResult]:
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.verify_passed,
+            bool(candidate.verification_execution and candidate.verification_execution.ok),
+            bool(candidate.patched_execution and candidate.patched_execution.ok),
+            candidate.score,
+            -candidate.changed_file_count,
+            -candidate.diff_line_count,
+            -candidate.index,
+        ),
+        reverse=True,
+    )
+    for rank, candidate in enumerate(ranked, start=1):
+        candidate.rank = rank
+    return ranked
+
+
+def _build_candidate_failure_message(candidates: list[PatchCandidateResult]) -> str:
+    details: list[str] = []
+    for candidate in candidates:
+        reason = candidate.error_message or "did not return a valid unified diff"
+        details.append(f"{candidate.label}: {reason}")
+    if not details:
+        return "All coder agents failed to produce a valid patch candidate."
+    return "All coder agents failed to produce a valid patch candidate. " + " | ".join(details[:6])
 
 
 def run_repair_pipeline(
@@ -903,63 +1126,247 @@ def run_repair_pipeline(
 
         _emit_stage(emit, "code", "started")
 
-        def on_diff_chunk(chunk: str) -> None:
-            emit("code_diff_chunk", {"stage": "code", "chunk": chunk})
-
-        coder_prompt = json.dumps(
-            {
-                "entrypoint": workspace.entrypoint,
-                "project_summary": workspace.to_summary(),
-                "runtime_report": runtime_report,
-                "inspector_report": inspector_report,
-                "planner_report": planner_report,
-                "entrypoint_code": workspace.entrypoint_code,
-                "output_contract": {
-                    "format": "unified git diff",
-                    "project_scope": "uploaded project only",
-                    "required_structure": [
-                        "diff --git a/<path> b/<path>",
-                        "--- a/<path>",
-                        "+++ b/<path>",
-                        "@@ ... @@",
-                    ],
-                    "forbidden_outputs": [
-                        "full rewritten file",
-                        "markdown code fences",
-                        "explanatory prose",
-                        "json",
-                    ],
-                },
+        coder_prompt_payload = {
+            "entrypoint": workspace.entrypoint,
+            "project_summary": workspace.to_summary(),
+            "runtime_report": runtime_report,
+            "inspector_report": inspector_report,
+            "planner_report": planner_report,
+            "entrypoint_code": workspace.entrypoint_code,
+            "output_contract": {
+                "format": "unified git diff",
+                "project_scope": "uploaded project only",
+                "required_structure": [
+                    "diff --git a/<path> b/<path>",
+                    "--- a/<path>",
+                    "+++ b/<path>",
+                    "@@ ... @@",
+                ],
+                "forbidden_outputs": [
+                    "full rewritten file",
+                    "markdown code fences",
+                    "explanatory prose",
+                    "json",
+                ],
             },
-            ensure_ascii=False,
-            indent=2,
-        )
-        raw_diff = call_llm_for_json(
-            prompt=coder_prompt,
-            system_prompt=CODE_SYSTEM_PROMPT,
-            model=request.model,
-            isJson=False,
-            stream=True,
-            stream_handler=on_diff_chunk,
-            tools=stage_tools,
-            tool_event_handler=_build_tool_event_handler(emit, "code"),
-            audit_context=make_llm_context("code", "code.diff"),
-        )
-        git_diff = _coerce_model_output_to_diff(
-            raw_diff,
-            original_files=workspace.file_map,
-            entrypoint=workspace.entrypoint,
-        )
-        if not git_diff:
-            raise RuntimeError("Repair model returned an empty diff.")
+        }
 
-        emit("code_report", {"stage": "code", "git_diff": git_diff})
+        patch_candidates: list[PatchCandidateResult] = []
+        for index, profile in enumerate(PATCH_CANDIDATE_PROFILES, start=1):
+            candidate = PatchCandidateResult(
+                index=index,
+                key=profile.key,
+                label=profile.label,
+                instructions=profile.instructions,
+            )
+            patch_candidates.append(candidate)
+            emit(
+                "candidate_status",
+                {
+                    "stage": "code",
+                    "candidate_key": candidate.key,
+                    "candidate_label": candidate.label,
+                    "status": "started",
+                },
+            )
+            try:
+                raw_diff = call_llm_for_json(
+                    prompt=json.dumps(
+                        {
+                            **coder_prompt_payload,
+                            "collaboration_context": {
+                                "mode": "multi_candidate_patch_committee",
+                                "candidate_key": candidate.key,
+                                "candidate_label": candidate.label,
+                                "candidate_instructions": candidate.instructions,
+                            },
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    system_prompt=CODE_SYSTEM_PROMPT,
+                    model=request.model,
+                    isJson=False,
+                    stream=False,
+                    tools=stage_tools,
+                    tool_event_handler=_build_tool_event_handler(
+                        emit,
+                        "code",
+                        candidate_label=candidate.label,
+                    ),
+                    audit_context=make_llm_context("code", f"code.diff.{candidate.key}"),
+                )
+                candidate.raw_output = raw_diff
+                candidate.git_diff = _coerce_model_output_to_diff(
+                    raw_diff,
+                    original_files=workspace.file_map,
+                    entrypoint=workspace.entrypoint,
+                )
+                candidate.patched_files = _apply_unified_diff_to_project(
+                    workspace.file_map,
+                    candidate.git_diff,
+                    default_path=workspace.entrypoint,
+                )
+                candidate.modified_files = sorted(
+                    path
+                    for path in set(workspace.file_map.keys()) | set(candidate.patched_files.keys())
+                    if workspace.file_map.get(path) != candidate.patched_files.get(path)
+                )
+                candidate.changed_file_count = len(candidate.modified_files)
+                candidate.added_lines, candidate.removed_lines = _count_diff_lines(candidate.git_diff)
+                candidate.diff_line_count = candidate.added_lines + candidate.removed_lines
+                emit(
+                    "candidate_status",
+                    {
+                        "stage": "code",
+                        "candidate_key": candidate.key,
+                        "candidate_label": candidate.label,
+                        "status": "generated",
+                        "changed_file_count": candidate.changed_file_count,
+                        "added_lines": candidate.added_lines,
+                        "removed_lines": candidate.removed_lines,
+                    },
+                )
+            except Exception as exc:
+                candidate.error_message = str(exc)
+                emit(
+                    "candidate_status",
+                    {
+                        "stage": "code",
+                        "candidate_key": candidate.key,
+                        "candidate_label": candidate.label,
+                        "status": "failed",
+                        "error_message": candidate.error_message,
+                    },
+                )
+
+        valid_candidates = [candidate for candidate in patch_candidates if candidate.git_diff]
+        if not valid_candidates:
+            fallback_candidate = PatchCandidateResult(
+                index=len(patch_candidates) + 1,
+                key="single_agent_fallback",
+                label="Single Agent Fallback",
+                instructions=(
+                    "Retry patch generation with the original single-agent streaming path so the "
+                    "workflow can recover even if all specialized candidates fail."
+                ),
+            )
+            patch_candidates.append(fallback_candidate)
+            emit(
+                "candidate_status",
+                {
+                    "stage": "code",
+                    "candidate_key": fallback_candidate.key,
+                    "candidate_label": fallback_candidate.label,
+                    "status": "started",
+                },
+            )
+
+            def on_fallback_diff_chunk(chunk: str) -> None:
+                emit("code_diff_chunk", {"stage": "code", "chunk": chunk})
+
+            try:
+                fallback_raw_diff = call_llm_for_json(
+                    prompt=json.dumps(
+                        coder_prompt_payload,
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    system_prompt=CODE_SYSTEM_PROMPT,
+                    model=request.model,
+                    isJson=False,
+                    stream=True,
+                    stream_handler=on_fallback_diff_chunk,
+                    tools=stage_tools,
+                    tool_event_handler=_build_tool_event_handler(
+                        emit,
+                        "code",
+                        candidate_label=fallback_candidate.label,
+                    ),
+                    audit_context=make_llm_context("code", "code.diff.single_agent_fallback"),
+                )
+                fallback_candidate.raw_output = fallback_raw_diff
+                fallback_candidate.git_diff = _coerce_model_output_to_diff(
+                    fallback_raw_diff,
+                    original_files=workspace.file_map,
+                    entrypoint=workspace.entrypoint,
+                )
+                fallback_candidate.patched_files = _apply_unified_diff_to_project(
+                    workspace.file_map,
+                    fallback_candidate.git_diff,
+                    default_path=workspace.entrypoint,
+                )
+                fallback_candidate.modified_files = sorted(
+                    path
+                    for path in set(workspace.file_map.keys()) | set(fallback_candidate.patched_files.keys())
+                    if workspace.file_map.get(path) != fallback_candidate.patched_files.get(path)
+                )
+                fallback_candidate.changed_file_count = len(fallback_candidate.modified_files)
+                fallback_candidate.added_lines, fallback_candidate.removed_lines = _count_diff_lines(
+                    fallback_candidate.git_diff
+                )
+                fallback_candidate.diff_line_count = (
+                    fallback_candidate.added_lines + fallback_candidate.removed_lines
+                )
+                emit(
+                    "candidate_status",
+                    {
+                        "stage": "code",
+                        "candidate_key": fallback_candidate.key,
+                        "candidate_label": fallback_candidate.label,
+                        "status": "generated",
+                        "changed_file_count": fallback_candidate.changed_file_count,
+                        "added_lines": fallback_candidate.added_lines,
+                        "removed_lines": fallback_candidate.removed_lines,
+                    },
+                )
+            except Exception as exc:
+                fallback_candidate.error_message = str(exc)
+                emit(
+                    "candidate_status",
+                    {
+                        "stage": "code",
+                        "candidate_key": fallback_candidate.key,
+                        "candidate_label": fallback_candidate.label,
+                        "status": "failed",
+                        "error_message": fallback_candidate.error_message,
+                    },
+                )
+
+            valid_candidates = [candidate for candidate in patch_candidates if candidate.git_diff]
+        if not valid_candidates:
+            raise RuntimeError(_build_candidate_failure_message(patch_candidates))
+
+        provisional_leader = min(
+            valid_candidates,
+            key=lambda candidate: (candidate.changed_file_count, candidate.diff_line_count, candidate.index),
+        )
+
+        emit(
+            "code_report",
+            {
+                "stage": "code",
+                "git_diff": provisional_leader.git_diff,
+                "report": _build_candidate_generation_report(
+                    patch_candidates,
+                    provisional_leader=provisional_leader,
+                ),
+            },
+        )
         _stream_explain(
             stage="code",
             prompt=json.dumps(
                 {
                     "planner_report": planner_report,
-                    "git_diff": git_diff,
+                    "candidate_generation_report": [
+                        _summarize_candidate(candidate)
+                        for candidate in patch_candidates
+                    ],
+                    "provisional_leader": {
+                        "candidate_key": provisional_leader.key,
+                        "candidate_label": provisional_leader.label,
+                        "git_diff": provisional_leader.git_diff,
+                    },
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -972,105 +1379,154 @@ def run_repair_pipeline(
         _emit_stage(emit, "code", "completed")
 
         _emit_stage(emit, "verify", "started")
-        patched_files = _apply_unified_diff_to_project(
-            workspace.file_map,
-            git_diff,
-            default_path=workspace.entrypoint,
-        )
-        verify_tools = build_repair_tools(
-            RepairToolContext(
-                entrypoint=workspace.entrypoint,
-                file_map=patched_files,
-                runtime_report=runtime_report,
-                dependency_graph=workspace.dependency_graph,
-                reverse_dependency_graph=workspace.reverse_dependency_graph,
-            )
-        )
-        verify_prompt = json.dumps(
-            {
-                "entrypoint": workspace.entrypoint,
-                "project_summary": workspace.to_summary(),
-                "runtime_report": runtime_report,
-                "inspector_report": inspector_report,
-                "planner_report": planner_report,
-                "git_diff": git_diff,
-                "patched_entrypoint_code": patched_files.get(workspace.entrypoint, ""),
-                "modified_files": sorted(
-                    path
-                    for path in set(workspace.file_map.keys()) | set(patched_files.keys())
-                    if workspace.file_map.get(path) != patched_files.get(path)
-                ),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        raw_verify_report = call_llm_for_json(
-            prompt=verify_prompt,
-            system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
-            model=request.model,
-            isJson=True,
-            tools=verify_tools,
-            tool_event_handler=_build_tool_event_handler(emit, "verify"),
-            audit_context=make_llm_context("verify", "verify.report"),
-        )
-        verification_base_source, skipped_verification_nodes = _build_verification_base_source(
-            patched_files.get(workspace.entrypoint, ""),
-            workspace.entrypoint,
-        )
-        existing_symbol_names = _collect_defined_symbol_names(
-            verification_base_source,
-            workspace.entrypoint,
-        )
-        verify_report = _normalize_verification_report(
-            raw_verify_report,
-            existing_symbol_names=existing_symbol_names,
-            filename=workspace.entrypoint,
-        )
 
-        with materialize_patched_workspace(
-            workspace.root_dir,
-            patched_files,
-            set(workspace.file_map.keys()),
-        ) as patched_root:
-            patched_execution = run_python_project_safely(
-                patched_root,
-                filename=workspace.entrypoint,
-                timeout_sec=request.timeout_sec,
+        for candidate in patch_candidates:
+            if not candidate.git_diff or not candidate.patched_files:
+                candidate.score = _score_candidate(candidate)
+                continue
+
+            emit(
+                "candidate_status",
+                {
+                    "stage": "verify",
+                    "candidate_key": candidate.key,
+                    "candidate_label": candidate.label,
+                    "status": "started",
+                },
+            )
+            try:
+                verify_tools = build_repair_tools(
+                    RepairToolContext(
+                        entrypoint=workspace.entrypoint,
+                        file_map=candidate.patched_files,
+                        runtime_report=runtime_report,
+                        dependency_graph=workspace.dependency_graph,
+                        reverse_dependency_graph=workspace.reverse_dependency_graph,
+                    )
+                )
+                verify_prompt = json.dumps(
+                    {
+                        "entrypoint": workspace.entrypoint,
+                        "project_summary": workspace.to_summary(),
+                        "runtime_report": runtime_report,
+                        "inspector_report": inspector_report,
+                        "planner_report": planner_report,
+                        "git_diff": candidate.git_diff,
+                        "candidate_profile": {
+                            "candidate_key": candidate.key,
+                            "candidate_label": candidate.label,
+                            "candidate_instructions": candidate.instructions,
+                        },
+                        "patched_entrypoint_code": candidate.patched_files.get(workspace.entrypoint, ""),
+                        "modified_files": candidate.modified_files,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                raw_verify_report = call_llm_for_json(
+                    prompt=verify_prompt,
+                    system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
+                    model=request.model,
+                    isJson=True,
+                    tools=verify_tools,
+                    tool_event_handler=_build_tool_event_handler(
+                        emit,
+                        "verify",
+                        candidate_label=candidate.label,
+                    ),
+                    audit_context=make_llm_context("verify", f"verify.report.{candidate.key}"),
+                )
+                verification_base_source, skipped_verification_nodes = _build_verification_base_source(
+                    candidate.patched_files.get(workspace.entrypoint, ""),
+                    workspace.entrypoint,
+                )
+                existing_symbol_names = _collect_defined_symbol_names(
+                    verification_base_source,
+                    workspace.entrypoint,
+                )
+                verify_report = _normalize_verification_report(
+                    raw_verify_report,
+                    existing_symbol_names=existing_symbol_names,
+                    filename=workspace.entrypoint,
+                )
+
+                with materialize_patched_workspace(
+                    workspace.root_dir,
+                    candidate.patched_files,
+                    set(workspace.file_map.keys()),
+                ) as patched_root:
+                    candidate.patched_execution = run_python_project_safely(
+                        patched_root,
+                        filename=workspace.entrypoint,
+                        timeout_sec=request.timeout_sec,
+                    )
+
+                verification_script = _build_verification_script(
+                    verification_base_source,
+                    verify_report["verification_code"],
+                )
+                with materialize_patched_workspace(
+                    workspace.root_dir,
+                    candidate.patched_files,
+                    set(workspace.file_map.keys()),
+                ) as verify_root:
+                    verify_target = verify_root / workspace.entrypoint
+                    verify_target.parent.mkdir(parents=True, exist_ok=True)
+                    verify_target.write_text(verification_script, encoding="utf-8")
+                    candidate.verification_execution = run_python_project_safely(
+                        verify_root,
+                        filename=workspace.entrypoint,
+                        timeout_sec=request.timeout_sec,
+                    )
+
+                candidate.verify_passed = bool(
+                    candidate.patched_execution.ok
+                    and candidate.verification_execution.ok
+                )
+                candidate.verification_report = {
+                    **verify_report,
+                    "modified_files": candidate.modified_files,
+                    "passed": candidate.verify_passed,
+                }
+                candidate.verification_stdout = candidate.verification_execution.stdout
+                candidate.verification_stderr = candidate.verification_execution.stderr
+                candidate.verification_base_mode = "definition_only_entrypoint_context"
+                candidate.skipped_top_level_nodes = skipped_verification_nodes
+            except Exception as exc:
+                candidate.error_message = str(exc)
+
+            candidate.score = _score_candidate(candidate)
+            emit(
+                "candidate_status",
+                {
+                    "stage": "verify",
+                    "candidate_key": candidate.key,
+                    "candidate_label": candidate.label,
+                    "status": "completed",
+                    "passed": candidate.verify_passed,
+                    "score": candidate.score,
+                    "error_message": candidate.error_message,
+                },
             )
 
-        verification_script = _build_verification_script(
-            verification_base_source,
-            verify_report["verification_code"],
-        )
-        with materialize_patched_workspace(
-            workspace.root_dir,
-            patched_files,
-            set(workspace.file_map.keys()),
-        ) as verify_root:
-            verify_target = verify_root / workspace.entrypoint
-            verify_target.parent.mkdir(parents=True, exist_ok=True)
-            verify_target.write_text(verification_script, encoding="utf-8")
-            verify_execution = run_python_project_safely(
-                verify_root,
-                filename=workspace.entrypoint,
-                timeout_sec=request.timeout_sec,
-            )
-
-        verify_passed = patched_execution.ok and verify_execution.ok
+        ranked_candidates = _rank_candidates(patch_candidates)
+        selected_candidate = ranked_candidates[0]
         verify_payload = {
-            **verify_report,
-            "patched_execution": patched_execution.to_dict(),
-            "verification_execution": verify_execution.to_dict(),
-            "verification_stdout": verify_execution.stdout,
-            "verification_stderr": verify_execution.stderr,
-            "verification_base_mode": "definition_only_entrypoint_context",
-            "skipped_top_level_nodes": skipped_verification_nodes,
-            "modified_files": sorted(
-                path
-                for path in set(workspace.file_map.keys()) | set(patched_files.keys())
-                if workspace.file_map.get(path) != patched_files.get(path)
+            "collaboration_mode": "multi_candidate_patch_committee",
+            "selection_policy": (
+                "Candidates are ranked by patched runtime success, assertion-based verification success, "
+                "assert coverage, and patch size. The highest-ranked candidate is returned automatically."
             ),
-            "passed": verify_passed,
+            "candidate_count": len(ranked_candidates),
+            "selected_candidate": _summarize_candidate(
+                selected_candidate,
+                include_details=True,
+            ),
+            "ranked_candidates": [
+                _summarize_candidate(candidate)
+                for candidate in ranked_candidates
+            ],
+            "passed": selected_candidate.verify_passed,
         }
         emit("verify_report", {"stage": "verify", "report": verify_payload})
         _stream_explain(
@@ -1092,13 +1548,17 @@ def run_repair_pipeline(
         emit(
             "result",
             {
-                "status": "verified" if verify_passed else "verify_failed",
+                "status": "verified" if selected_candidate.verify_passed else "verify_failed",
                 "filename": workspace.entrypoint,
-                "git_diff": git_diff,
-                "verification_passed": verify_passed,
+                "git_diff": selected_candidate.git_diff,
+                "verification_passed": selected_candidate.verify_passed,
+                "selection_summary": (
+                    f"Auto-selected {selected_candidate.label} from {len(ranked_candidates)} patch candidates "
+                    f"with score {selected_candidate.score}."
+                ),
                 "message": (
                     "Verification passed. Review the patch and decide whether to accept it."
-                    if verify_passed
+                    if selected_candidate.verify_passed
                     else "Verification failed. The generated patch did not satisfy the assertion checks."
                 ),
             },
