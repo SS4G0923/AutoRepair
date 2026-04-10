@@ -120,22 +120,15 @@ export function AdminWorkspace({
     <section
       className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow ${workspaceMainClass}`}
     >
-      <div className="shrink-0 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-[0.32em] text-slate-500 dark:text-white/40">
-            {activeMeta.eyebrow}
-          </div>
-          <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">
+      <div className="shrink-0 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="text-base font-semibold tracking-tight text-slate-900 dark:text-white">
             {activeMeta.title}
           </div>
-          <div className="mt-2 max-w-4xl text-sm text-slate-600 dark:text-white/65">
-            {activeMeta.hint}
-          </div>
         </div>
-
         <button
           onClick={onRefresh}
-          className={`rounded-full px-5 py-3 text-sm font-semibold transition ${
+          className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
             adminLoading
               ? "cursor-wait bg-slate-300 text-slate-700 dark:bg-white/20 dark:text-white/75"
               : "bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
@@ -151,7 +144,7 @@ export function AdminWorkspace({
         </div>
       ) : null}
 
-      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+      <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
         {adminPage === "dashboard" ? (
           <AdminDashboardPage copy={copy} data={dashboardData} />
         ) : adminPage === "users" ? (

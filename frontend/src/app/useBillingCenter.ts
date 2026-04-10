@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import type { BillingOrderItem, BillingSummaryData, PaymentMethodCode } from "../types";
+import type {
+  BillingOrderItem,
+  BillingOrderSession,
+  BillingSummaryData,
+  PaymentMethodCode,
+} from "../types";
 
 interface UseBillingCenterOptions {
   apiBaseUrl: string;
@@ -39,6 +44,7 @@ export function useBillingCenter({
   const [billingError, setBillingError] = useState("");
   const [billingData, setBillingData] = useState<BillingSummaryData | null>(null);
   const [activeOrderId, setActiveOrderId] = useState<number | null>(null);
+  const [activeOrderSession, setActiveOrderSession] = useState<BillingOrderSession | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   useEffect(() => {
@@ -46,6 +52,7 @@ export function useBillingCenter({
       setBillingError("");
       setBillingData(null);
       setActiveOrderId(null);
+      setActiveOrderSession(null);
       return;
     }
 
@@ -61,7 +68,8 @@ export function useBillingCenter({
     )
       .then((data) => {
         setBillingData(data);
-        setActiveOrderId((current) => current ?? data.orders[0]?.id ?? null);
+        const nextActiveOrderId = data.orders[0]?.id ?? null;
+        setActiveOrderId((current) => current ?? nextActiveOrderId);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) {
@@ -77,6 +85,30 @@ export function useBillingCenter({
 
     return () => controller.abort();
   }, [apiBaseUrl, enabled, refreshNonce]);
+
+  useEffect(() => {
+    if (!enabled || activeOrderId == null) {
+      setActiveOrderSession(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    void fetchBillingJson<BillingOrderSession>(
+      apiBaseUrl,
+      `/api/billing/orders/${activeOrderId}/session`,
+      undefined,
+      controller.signal,
+    )
+      .then((payload) => setActiveOrderSession(payload))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setBillingError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => controller.abort();
+  }, [activeOrderId, apiBaseUrl, enabled]);
 
   async function refreshBillingData() {
     setRefreshNonce((current) => current + 1);
@@ -108,22 +140,22 @@ export function useBillingCenter({
     }
   }
 
-  async function completeSandboxOrder(orderId: number) {
+  async function refreshOrderSession(orderId?: number) {
+    const targetOrderId = orderId ?? activeOrderId;
+    if (targetOrderId == null) {
+      return;
+    }
     setBillingActing(true);
     setBillingError("");
     try {
-      await fetchBillingJson(
+      const payload = await fetchBillingJson<BillingOrderSession>(
         apiBaseUrl,
-        `/api/billing/orders/${orderId}/sandbox-complete`,
-        {
-          method: "POST",
-        },
+        `/api/billing/orders/${targetOrderId}/session`,
       );
+      setActiveOrderSession(payload);
       if (refreshSession) {
         await refreshSession();
       }
-      setActiveOrderId(orderId);
-      await refreshBillingData();
     } catch (error) {
       setBillingError(error instanceof Error ? error.message : String(error));
       throw error;
@@ -138,9 +170,10 @@ export function useBillingCenter({
     billingError,
     billingData,
     activeOrderId,
+    activeOrderSession,
     setActiveOrderId,
     refreshBillingData,
+    refreshOrderSession,
     createOrder,
-    completeSandboxOrder,
   };
 }

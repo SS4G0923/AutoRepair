@@ -36,6 +36,7 @@ from backend.billing.store import (
     complete_payment_order_in_sandbox,
     create_payment_order_for_user,
     get_billing_summary_for_user,
+    get_payment_order_session_for_user,
     list_payment_orders_for_admin,
     update_user_role_by_admin,
 )
@@ -756,6 +757,22 @@ def billing_create_order() -> Response:
     return jsonify({"order": order})
 
 
+@app.route("/api/billing/orders/<int:order_id>/session", methods=["GET", "OPTIONS"])
+@_require_login
+def billing_order_session(order_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    try:
+        payload = get_payment_order_session_for_user(user_id=int(user["id"]), order_id=order_id)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(payload)
+
+
 @app.route("/api/billing/orders/<int:order_id>/sandbox-complete", methods=["POST", "OPTIONS"])
 @_require_login
 def billing_complete_sandbox(order_id: int) -> Response:
@@ -774,6 +791,48 @@ def billing_complete_sandbox(order_id: int) -> Response:
     if isinstance(refreshed_user, dict):
         _set_user_session(refreshed_user)
     return jsonify(payload)
+
+
+def _payment_provider_placeholder_response(provider: str) -> Response:
+    return (
+        jsonify(
+            {
+                "error": (
+                    f"{provider} callback endpoint is scaffolded but not fully implemented yet. "
+                    "Add provider signature verification, status mapping, and order capture logic."
+                )
+            }
+        ),
+        501,
+    )
+
+
+@app.route("/api/billing/providers/stripe/webhook", methods=["POST", "OPTIONS"])
+def billing_stripe_webhook() -> Response:
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    return _payment_provider_placeholder_response("Stripe")
+
+
+@app.route("/api/billing/providers/paypal/webhook", methods=["POST", "OPTIONS"])
+def billing_paypal_webhook() -> Response:
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    return _payment_provider_placeholder_response("PayPal")
+
+
+@app.route("/api/billing/providers/wechat/notify", methods=["POST", "OPTIONS"])
+def billing_wechat_notify() -> Response:
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    return _payment_provider_placeholder_response("WeChat Pay")
+
+
+@app.route("/api/billing/providers/alipay/notify", methods=["POST", "OPTIONS"])
+def billing_alipay_notify() -> Response:
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    return _payment_provider_placeholder_response("Alipay")
 
 
 @app.route("/api/repair/stream", methods=["POST", "OPTIONS"])

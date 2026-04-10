@@ -40,8 +40,8 @@ export function AdminPaymentsPage({
   const canGoNext = Boolean(orders && orders.page * orders.page_size < orders.total);
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="space-y-2">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <AdminMetricCard
           label={copy.adminPayments}
           value={formatAdminNumber(summary?.total_orders ?? 0)}
@@ -65,13 +65,7 @@ export function AdminPaymentsPage({
       </div>
 
       <AdminSurface>
-        <AdminSectionTitle
-          eyebrow={copy.adminPayments}
-          title={copy.adminPaymentsTitle}
-          hint={copy.adminPaymentsHint}
-        />
-
-        <div className="mt-4 grid gap-3 xl:grid-cols-[1.35fr_0.8fr_0.8fr]">
+        <div className="grid gap-2 xl:grid-cols-[1.35fr_0.8fr_0.8fr]">
           <input
             value={filters.q}
             onChange={(event) =>
@@ -82,7 +76,7 @@ export function AdminPaymentsPage({
               }))
             }
             placeholder={copy.adminSearchPlaceholder}
-            className="rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
           />
           <select
             value={filters.status}
@@ -93,7 +87,7 @@ export function AdminPaymentsPage({
                 status: event.target.value,
               }))
             }
-            className="rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.adminFilterStatus}: {copy.adminFilterAll}</option>
             <option value="pending">{copy.billingStatusPending}</option>
@@ -109,7 +103,7 @@ export function AdminPaymentsPage({
                 paymentMethod: event.target.value,
               }))
             }
-            className="rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.billingPaymentMethod}: {copy.adminFilterAll}</option>
             <option value="card">{copy.billingProviderCard}</option>
@@ -119,11 +113,11 @@ export function AdminPaymentsPage({
           </select>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600 dark:text-white/60">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-white/60">
           <div>
             {copy.adminShowing} {orders?.total ? startIndex : 0}-{endIndex} {copy.adminOf} {formatAdminNumber(orders?.total ?? 0)}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() =>
                 setFilters((current) => ({
@@ -132,7 +126,7 @@ export function AdminPaymentsPage({
                 }))
               }
               disabled={!canGoPrevious}
-              className="rounded-full border border-black/10 px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
+              className="rounded-full border border-black/10 px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
             >
               {copy.adminPrevious}
             </button>
@@ -144,7 +138,7 @@ export function AdminPaymentsPage({
                 }))
               }
               disabled={!canGoNext}
-              className="rounded-full border border-black/10 px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
+              className="rounded-full border border-black/10 px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
             >
               {copy.adminNext}
             </button>
@@ -153,7 +147,7 @@ export function AdminPaymentsPage({
       </AdminSurface>
 
       <AdminSurface>
-        <div className="space-y-3">
+        <div className="space-y-2">
           {items.length === 0 ? (
             <AdminEmptyState message={copy.adminNoData} />
           ) : (
@@ -162,59 +156,52 @@ export function AdminPaymentsPage({
               return (
                 <div
                   key={order.id}
-                  className="rounded-[22px] border border-black/5 bg-black/[0.02] px-4 py-4 dark:border-white/10 dark:bg-white/[0.03]"
+                  className="rounded-2xl border border-black/5 bg-black/[0.02] px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]"
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="font-medium text-slate-900 dark:text-white">
-                          #{order.order_no} · {order.plan_name}
-                        </div>
-                        <AdminBadge label={getPaymentStatusLabel(copy, order.order_status)} tone={
-                          order.order_status === "paid"
-                            ? "emerald"
-                            : order.order_status === "rejected" || order.order_status === "failed"
-                              ? "rose"
-                              : "amber"
-                        } />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <div className="text-sm font-medium text-slate-900 dark:text-white">
+                        #{order.order_no} · {order.plan_name}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-white/45">
-                        {(order.user_display_name || order.user_email || "-")} · {getPaymentMethodLabel(copy, order.payment_method)}
-                      </div>
+                      <AdminBadge label={getPaymentStatusLabel(copy, order.order_status)} tone={
+                        order.order_status === "paid"
+                          ? "emerald"
+                          : order.order_status === "rejected" || order.order_status === "failed"
+                            ? "rose"
+                            : "amber"
+                      } />
                     </div>
-                    <div className="text-right text-sm text-slate-600 dark:text-white/60">
-                      <div>{formatCurrencyAmount(order.amount_cents, order.currency)}</div>
-                      <div className="mt-1 text-xs">{formatAdminDateTime(order.created_at)}</div>
+                    <div className="text-right text-xs text-slate-600 dark:text-white/60">
+                      {formatCurrencyAmount(order.amount_cents, order.currency)} · {formatAdminDateTime(order.created_at)}
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 text-xs text-slate-500 dark:text-white/45 sm:grid-cols-2 xl:grid-cols-5">
-                    <div>{copy.billingPaymentMethod}: {getPaymentMethodLabel(copy, order.payment_method)}</div>
-                    <div>{copy.billingPaymentMode}: {order.checkout_action}</div>
-                    <div>{copy.billingStatusPaid}: {order.paid_at ? formatAdminDateTime(order.paid_at) : "-"}</div>
-                    <div>{copy.adminUserLabel}: {order.user_email || "-"}</div>
-                    <div>{copy.adminRole}: {order.target_role}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-white/45">
+                    <span>{order.user_display_name || order.user_email || "-"}</span>
+                    <span>{getPaymentMethodLabel(copy, order.payment_method)} · {order.checkout_action}</span>
+                    <span>{order.target_role}</span>
+                    {order.paid_at ? <span>{formatAdminDateTime(order.paid_at)}</span> : null}
                   </div>
 
                   {order.instructions ? (
-                    <div className="mt-3 rounded-[16px] border border-dashed border-black/10 px-3 py-3 text-xs text-slate-600 dark:border-white/10 dark:text-white/55">
+                    <div className="mt-2 rounded-xl border border-dashed border-black/10 px-2.5 py-2 text-xs text-slate-600 dark:border-white/10 dark:text-white/55">
                       {order.instructions}
                     </div>
                   ) : null}
 
                   {order.order_status === "pending" ? (
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       <button
                         onClick={() => onApprove(order.id)}
                         disabled={actionDisabled}
-                        className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
+                        className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
                       >
                         {actionDisabled ? copy.adminRefresh : copy.adminApprove}
                       </button>
                       <button
                         onClick={() => onReject(order.id)}
                         disabled={actionDisabled}
-                        className="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold transition hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:hover:bg-white/[0.05]"
+                        className="rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold transition hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:hover:bg-white/[0.05]"
                       >
                         {copy.adminReject}
                       </button>

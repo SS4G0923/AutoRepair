@@ -572,6 +572,7 @@ function App() {
               ) : workspaceMode === "billing" ? (
                 <BillingWorkspace
                   activeOrderId={billing.activeOrderId}
+                  activeOrderSession={billing.activeOrderSession}
                   billingActing={billing.billingActing}
                   billingData={billing.billingData}
                   billingError={billing.billingError}
@@ -579,11 +580,11 @@ function App() {
                   copy={dict}
                   currentUser={currentUser}
                   workspaceMainClass={workspaceMainClass}
-                  onCompleteSandboxOrder={billing.completeSandboxOrder}
                   onCreateOrder={billing.createOrder}
                   onRefresh={() => {
                     void billing.refreshBillingData();
                   }}
+                  onRefreshOrderSession={billing.refreshOrderSession}
                   onSelectOrder={billing.setActiveOrderId}
                 />
               ) : workspaceMode === "agent" ? (

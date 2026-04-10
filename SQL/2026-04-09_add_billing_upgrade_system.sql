@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS `payment_orders` (
     `payment_method` VARCHAR(16) NOT NULL,
     `order_status` VARCHAR(24) NOT NULL DEFAULT 'pending',
     `provider_status` VARCHAR(32) NULL,
-    `checkout_action` VARCHAR(24) NOT NULL DEFAULT 'sandbox',
+    `checkout_action` VARCHAR(24) NOT NULL DEFAULT 'pending_provider_init',
     `checkout_url` VARCHAR(1024) NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

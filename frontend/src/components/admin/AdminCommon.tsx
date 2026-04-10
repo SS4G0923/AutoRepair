@@ -81,7 +81,7 @@ interface AdminSurfaceProps extends PropsWithChildren {
 export function AdminSurface({ children, className = "" }: AdminSurfaceProps) {
   return (
     <section
-      className={`rounded-[24px] border border-black/5 bg-white/70 p-4 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04] dark:shadow-glow ${className}`.trim()}
+      className={`rounded-[20px] border border-black/5 bg-white/70 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04] dark:shadow-glow ${className}`.trim()}
     >
       {children}
     </section>
@@ -102,17 +102,14 @@ export function AdminSectionTitle({
   actions,
 }: AdminSectionTitleProps) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        {eyebrow ? (
-          <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500 dark:text-white/35">
-            {eyebrow}
-          </div>
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{title}</div>
+        {hint ? (
+          <div className="hidden truncate text-xs text-slate-500 dark:text-white/45 sm:block">{hint}</div>
         ) : null}
-        <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">{title}</div>
-        {hint ? <div className="mt-1 text-sm text-slate-600 dark:text-white/60">{hint}</div> : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
     </div>
   );
 }
@@ -131,10 +128,10 @@ export function AdminMetricCard({
   tone = "slate",
 }: AdminMetricCardProps) {
   return (
-    <div className={`rounded-[22px] border p-4 ${toneClasses(tone)}`}>
-      <div className="text-[11px] uppercase tracking-[0.24em] opacity-70">{label}</div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight">{value}</div>
-      {caption ? <div className="mt-2 text-sm opacity-75">{caption}</div> : null}
+    <div className={`rounded-2xl border px-3 py-2.5 ${toneClasses(tone)}`}>
+      <div className="text-[10px] uppercase tracking-[0.22em] opacity-70">{label}</div>
+      <div className="mt-1 text-xl font-semibold tracking-tight">{value}</div>
+      {caption ? <div className="mt-1 truncate text-xs opacity-70">{caption}</div> : null}
     </div>
   );
 }
@@ -158,7 +155,7 @@ interface AdminEmptyStateProps {
 
 export function AdminEmptyState({ message }: AdminEmptyStateProps) {
   return (
-    <div className="grid min-h-[12rem] place-items-center rounded-[24px] border border-dashed border-black/10 bg-black/[0.02] px-6 py-8 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.02] dark:text-white/45">
+    <div className="grid min-h-[5rem] place-items-center rounded-2xl border border-dashed border-black/10 bg-black/[0.02] px-4 py-4 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.02] dark:text-white/45">
       {message}
     </div>
   );
@@ -171,11 +168,11 @@ interface AdminCodeBlockProps {
 
 export function AdminCodeBlock({ title, content }: AdminCodeBlockProps) {
   return (
-    <div className="rounded-[22px] border border-black/5 bg-black/[0.025] dark:border-white/10 dark:bg-white/[0.025]">
-      <div className="border-b border-black/5 px-4 py-3 text-xs uppercase tracking-[0.24em] text-slate-500 dark:border-white/10 dark:text-white/35">
+    <div className="rounded-2xl border border-black/5 bg-black/[0.025] dark:border-white/10 dark:bg-white/[0.025]">
+      <div className="border-b border-black/5 px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:border-white/10 dark:text-white/35">
         {title}
       </div>
-      <pre className="max-h-[18rem] overflow-auto px-4 py-4 text-xs leading-6 text-slate-700 dark:text-white/75">
+      <pre className="max-h-[14rem] overflow-auto px-3 py-3 text-xs leading-5 text-slate-700 dark:text-white/75">
         {content.trim() || "-"}
       </pre>
     </div>

@@ -33,11 +33,11 @@ function RequestMetaRow({
   value: string;
 }) {
   return (
-    <div className="rounded-[18px] border border-black/5 bg-black/[0.02] px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
-      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 dark:text-white/35">
+    <div className="rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-white/35">
         {label}
       </div>
-      <div className="mt-1 break-words text-sm text-slate-800 dark:text-white/80">{value || "-"}</div>
+      <div className="mt-0.5 break-words text-xs text-slate-800 dark:text-white/80">{value || "-"}</div>
     </div>
   );
 }
@@ -59,14 +59,9 @@ export function AdminRequestsPage({
   const canGoNext = Boolean(requests && requests.page * requests.page_size < requests.total);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <AdminSurface>
-        <AdminSectionTitle
-          eyebrow={copy.adminRequests}
-          title={copy.adminRequestsTitle}
-          hint={copy.adminRequestsHint}
-        />
-        <div className="mt-4 grid gap-3 xl:grid-cols-[1.3fr_1fr_0.7fr_0.7fr]">
+        <div className="grid gap-2 xl:grid-cols-[1.3fr_1fr_0.7fr_0.7fr]">
           <input
             value={requestFilters.q}
             onChange={(event) =>
@@ -77,7 +72,7 @@ export function AdminRequestsPage({
               }))
             }
             placeholder={copy.adminSearchPlaceholder}
-            className="rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
           />
           <input
             value={requestFilters.model}
@@ -89,7 +84,7 @@ export function AdminRequestsPage({
               }))
             }
             placeholder={copy.adminFilterModel}
-            className="rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
           />
           <select
             value={requestFilters.status}
@@ -100,7 +95,7 @@ export function AdminRequestsPage({
                 status: event.target.value,
               }))
             }
-            className="rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.adminFilterStatus}: {copy.adminFilterAll}</option>
             <option value="completed">{copy.adminFilterCompleted}</option>
@@ -115,7 +110,7 @@ export function AdminRequestsPage({
                 requestMode: event.target.value,
               }))
             }
-            className="rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.adminFilterMode}: {copy.adminFilterAll}</option>
             <option value="chat">{copy.adminFilterChat}</option>
@@ -123,11 +118,11 @@ export function AdminRequestsPage({
           </select>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600 dark:text-white/60">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-white/60">
           <div>
             {copy.adminShowing} {requests?.total ? startIndex : 0}-{endIndex} {copy.adminOf} {formatAdminNumber(requests?.total ?? 0)}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() =>
                 setRequestFilters((current) => ({
@@ -136,7 +131,7 @@ export function AdminRequestsPage({
                 }))
               }
               disabled={!canGoPrevious}
-              className="rounded-full border border-black/10 px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
+              className="rounded-full border border-black/10 px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
             >
               {copy.adminPrevious}
             </button>
@@ -148,7 +143,7 @@ export function AdminRequestsPage({
                 }))
               }
               disabled={!canGoNext}
-              className="rounded-full border border-black/10 px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
+              className="rounded-full border border-black/10 px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
             >
               {copy.adminNext}
             </button>
@@ -156,9 +151,9 @@ export function AdminRequestsPage({
         </div>
       </AdminSurface>
 
-      <div className="grid gap-3 xl:grid-cols-[0.78fr_1.22fr]">
-        <AdminSurface className="min-h-[24rem]">
-          <div className="space-y-3">
+      <div className="grid gap-2 xl:grid-cols-[0.78fr_1.22fr]">
+        <AdminSurface className="min-h-[18rem]">
+          <div className="space-y-2">
             {items.length === 0 ? (
               <AdminEmptyState message={copy.adminNoData} />
             ) : (
@@ -168,43 +163,24 @@ export function AdminRequestsPage({
                   <button
                     key={item.id}
                     onClick={() => onSelectRequest(item.id)}
-                    className={`w-full rounded-[22px] border px-4 py-4 text-left transition ${
+                    className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
                       active
                         ? "border-slate-900 bg-slate-900 text-white shadow-lg dark:border-white dark:bg-white dark:text-slate-950"
                         : "border-black/5 bg-black/[0.02] hover:bg-black/[0.04] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/80 dark:hover:bg-white/[0.05]"
                     }`}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate font-medium">#{item.id} · {item.model}</div>
-                        <div
-                          className={`mt-1 text-xs ${
-                            active ? "text-white/70 dark:text-slate-950/70" : "text-slate-500 dark:text-white/45"
-                          }`}
-                        >
-                          {item.provider} · {item.request_mode} · {item.stage || "-"}
-                        </div>
+                        <div className="truncate text-sm font-medium">#{item.id} · {item.model}</div>
                       </div>
                       <AdminBadge label={item.request_status} tone={toStatusTone(item.request_status)} />
                     </div>
-
                     <div
-                      className={`mt-3 text-xs ${
+                      className={`mt-1 text-[11px] ${
                         active ? "text-white/70 dark:text-slate-950/70" : "text-slate-500 dark:text-white/45"
                       }`}
                     >
-                      {item.user_display_name || item.user_email || "-"}
-                    </div>
-
-                    <div
-                      className={`mt-3 grid gap-2 text-xs sm:grid-cols-2 ${
-                        active ? "text-white/75 dark:text-slate-950/75" : "text-slate-500 dark:text-white/45"
-                      }`}
-                    >
-                      <div>{formatAdminNumber(item.total_tokens)} {copy.adminTokens}</div>
-                      <div>{formatAdminDurationMs(item.latency_ms)}</div>
-                      <div>{item.purpose || "-"}</div>
-                      <div>{formatAdminDateTime(item.started_at)}</div>
+                      {item.provider} · {item.request_mode} · {formatAdminNumber(item.total_tokens)} tk · {item.user_display_name || item.user_email || "-"}
                     </div>
                   </button>
                 );
@@ -213,22 +189,21 @@ export function AdminRequestsPage({
           </div>
         </AdminSurface>
 
-        <AdminSurface className="min-h-[24rem]">
+        <AdminSurface className="min-h-[18rem]">
           {requestDetailLoading ? (
-            <div className="grid min-h-[20rem] place-items-center text-sm text-slate-500 dark:text-white/45">
+            <div className="grid min-h-[14rem] place-items-center text-sm text-slate-500 dark:text-white/45">
               {copy.adminRefresh}...
             </div>
           ) : !requestDetail ? (
             <AdminEmptyState message={copy.adminNoSelection} />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               <AdminSectionTitle
-                eyebrow={copy.adminRequests}
                 title={copy.adminRequestDetail}
                 hint={`#${requestDetail.request.id} · ${requestDetail.request.model}`}
               />
 
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 <RequestMetaRow label={copy.adminRequestId} value={String(requestDetail.request.id)} />
                 <RequestMetaRow
                   label={copy.adminUserLabel}
@@ -263,7 +238,7 @@ export function AdminRequestsPage({
                 <RequestMetaRow label={copy.adminRequestError} value={requestDetail.request.error_message || "-"} />
               </div>
 
-              <div className="grid gap-3 xl:grid-cols-2">
+              <div className="grid gap-2 xl:grid-cols-2">
                 <AdminCodeBlock title={copy.adminSystemPrompt} content={requestDetail.message.system_prompt} />
                 <AdminCodeBlock title={copy.adminParsedJson} content={requestDetail.message.parsed_response_json} />
               </div>
@@ -272,14 +247,14 @@ export function AdminRequestsPage({
 
               <div>
                 <AdminSectionTitle title={copy.adminToolEvents} />
-                <div className="mt-3 space-y-3">
+                <div className="mt-2 space-y-2">
                   {requestDetail.tool_events.length === 0 ? (
                     <AdminEmptyState message={copy.adminToolEventsEmpty} />
                   ) : (
                     requestDetail.tool_events.map((event) => (
                       <div
                         key={event.id}
-                        className="rounded-[22px] border border-black/5 bg-black/[0.02] px-4 py-4 dark:border-white/10 dark:bg-white/[0.03]"
+                        className="rounded-2xl border border-black/5 bg-black/[0.02] px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="font-medium text-slate-900 dark:text-white">

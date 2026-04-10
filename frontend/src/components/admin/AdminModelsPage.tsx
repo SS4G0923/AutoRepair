@@ -35,19 +35,17 @@ export function AdminModelsPage({
   const maxSeriesValue = dailySeries.reduce((current, item) => Math.max(current, item.total_tokens), 0);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <AdminSurface>
         <AdminSectionTitle
-          eyebrow={copy.adminModels}
           title={copy.adminModelsTitle}
-          hint={copy.adminModelsHint}
           actions={
             <>
               {[7, 30, 90].map((value) => (
                 <button
                   key={value}
                   onClick={() => onDaysChange(value)}
-                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
                     days === value
                       ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                       : "border border-black/10 text-slate-600 dark:border-white/10 dark:text-white/65"
@@ -61,21 +59,17 @@ export function AdminModelsPage({
         />
       </AdminSurface>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <AdminMetricCard label={copy.adminModels} value={formatAdminNumber(items.length)} tone="sky" />
         <AdminMetricCard label={copy.adminRequestCount} value={formatAdminNumber(totalRequests)} tone="emerald" />
         <AdminMetricCard label={copy.adminTokens} value={formatAdminNumber(totalTokens)} tone="amber" />
         <AdminMetricCard label={copy.adminLatency} value={formatAdminDurationMs(averageLatency)} tone="rose" />
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-[0.9fr_1.1fr]">
+      <div className="grid gap-2 xl:grid-cols-[0.9fr_1.1fr]">
         <AdminSurface>
-          <AdminSectionTitle
-            eyebrow={copy.adminModels}
-            title={copy.adminDailyModelUsage}
-            hint={`${days}d`}
-          />
-          <div className="mt-4 space-y-3">
+          <AdminSectionTitle title={copy.adminDailyModelUsage} hint={`${days}d`} />
+          <div className="mt-2 space-y-2">
             {dailySeries.length === 0 ? (
               <AdminEmptyState message={copy.adminNoData} />
             ) : (
@@ -100,50 +94,46 @@ export function AdminModelsPage({
         </AdminSurface>
 
         <AdminSurface>
-          <AdminSectionTitle
-            eyebrow={copy.adminTopModels}
-            title={copy.adminModels}
-            hint={`${copy.adminFilterAll}: ${formatAdminNumber(items.length)}`}
-          />
-          <div className="mt-4 overflow-x-auto">
+          <AdminSectionTitle title={copy.adminModels} hint={`${formatAdminNumber(items.length)} total`} />
+          <div className="mt-2 overflow-x-auto">
             {items.length === 0 ? (
               <AdminEmptyState message={copy.adminNoData} />
             ) : (
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-xs uppercase tracking-[0.24em] text-slate-500 dark:text-white/35">
-                  <tr>
-                    <th className="px-3 py-3">{copy.model}</th>
-                    <th className="px-3 py-3">{copy.adminRequestProvider}</th>
-                    <th className="px-3 py-3">{copy.adminRequestCount}</th>
-                    <th className="px-3 py-3">{copy.adminInputTokens}</th>
-                    <th className="px-3 py-3">{copy.adminOutputTokens}</th>
-                    <th className="px-3 py-3">{copy.adminTokens}</th>
-                    <th className="px-3 py-3">{copy.adminLatency}</th>
-                    <th className="px-3 py-3">{copy.adminLastLogin}</th>
+            <table className="min-w-full text-left text-xs">
+              <thead className="text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-white/35">
+                <tr>
+                  <th className="px-2 py-2">{copy.model}</th>
+                  <th className="px-2 py-2">{copy.adminRequestProvider}</th>
+                  <th className="px-2 py-2">{copy.adminRequestCount}</th>
+                  <th className="px-2 py-2">{copy.adminInputTokens}</th>
+                  <th className="px-2 py-2">{copy.adminOutputTokens}</th>
+                  <th className="px-2 py-2">{copy.adminTokens}</th>
+                  <th className="px-2 py-2">{copy.adminLatency}</th>
+                  <th className="px-2 py-2">{copy.adminLastLogin}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr
+                    key={`${item.provider}-${item.model}`}
+                    className="border-t border-black/5 text-slate-700 dark:border-white/10 dark:text-white/75"
+                  >
+                    <td className="px-2 py-2">
+                      <div className="font-medium text-slate-900 dark:text-white">{item.model}</div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <AdminBadge label={item.provider} tone="slate" />
+                    </td>
+                    <td className="px-2 py-2">{formatAdminNumber(item.request_count)}</td>
+                    <td className="px-2 py-2">{formatAdminNumber(item.input_tokens)}</td>
+                    <td className="px-2 py-2">{formatAdminNumber(item.output_tokens)}</td>
+                    <td className="px-2 py-2">{formatAdminNumber(item.total_tokens)}</td>
+                    <td className="px-2 py-2">{formatAdminDurationMs(item.avg_latency_ms)}</td>
+                    <td className="px-2 py-2">{formatAdminDateTime(item.last_used_at)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <tr
-                      key={`${item.provider}-${item.model}`}
-                      className="border-t border-black/5 text-slate-700 dark:border-white/10 dark:text-white/75"
-                    >
-                      <td className="px-3 py-3">
-                        <div className="font-medium text-slate-900 dark:text-white">{item.model}</div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <AdminBadge label={item.provider} tone="slate" />
-                      </td>
-                      <td className="px-3 py-3">{formatAdminNumber(item.request_count)}</td>
-                      <td className="px-3 py-3">{formatAdminNumber(item.input_tokens)}</td>
-                      <td className="px-3 py-3">{formatAdminNumber(item.output_tokens)}</td>
-                      <td className="px-3 py-3">{formatAdminNumber(item.total_tokens)}</td>
-                      <td className="px-3 py-3">{formatAdminDurationMs(item.avg_latency_ms)}</td>
-                      <td className="px-3 py-3">{formatAdminDateTime(item.last_used_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
+            </table>
             )}
           </div>
         </AdminSurface>

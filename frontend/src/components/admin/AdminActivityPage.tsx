@@ -34,8 +34,8 @@ export function AdminActivityPage({
   const canGoNext = Boolean(loginEvents && loginEvents.page * loginEvents.page_size < loginEvents.total);
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="space-y-2">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <AdminMetricCard label={copy.adminRecentLoginAttempts} value={formatAdminNumber(items.length)} tone="sky" />
         <AdminMetricCard label={copy.adminFilterCompleted} value={formatAdminNumber(successCount)} tone="emerald" />
         <AdminMetricCard label={copy.adminFilterFailed} value={formatAdminNumber(failedCount)} tone="rose" />
@@ -43,25 +43,20 @@ export function AdminActivityPage({
       </div>
 
       <AdminSurface>
-        <AdminSectionTitle
-          eyebrow={copy.adminActivity}
-          title={copy.adminActivityTitle}
-          hint={copy.adminActivityHint}
-        />
-        <div className="mt-4 overflow-x-auto">
+        <div className="overflow-x-auto">
           {items.length === 0 ? (
             <AdminEmptyState message={copy.adminNoData} />
           ) : (
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-xs uppercase tracking-[0.24em] text-slate-500 dark:text-white/35">
+            <table className="min-w-full text-left text-xs">
+              <thead className="text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-white/35">
                 <tr>
-                  <th className="px-3 py-3">{copy.adminUserLabel}</th>
-                  <th className="px-3 py-3">{copy.adminLoginMethod}</th>
-                  <th className="px-3 py-3">{copy.adminLoginStatus}</th>
-                  <th className="px-3 py-3">{copy.adminFailureReason}</th>
-                  <th className="px-3 py-3">{copy.adminIpAddress}</th>
-                  <th className="px-3 py-3">{copy.adminUserAgent}</th>
-                  <th className="px-3 py-3">{copy.adminCreatedAt}</th>
+                  <th className="px-2 py-2">{copy.adminUserLabel}</th>
+                  <th className="px-2 py-2">{copy.adminLoginMethod}</th>
+                  <th className="px-2 py-2">{copy.adminLoginStatus}</th>
+                  <th className="px-2 py-2">{copy.adminFailureReason}</th>
+                  <th className="px-2 py-2">{copy.adminIpAddress}</th>
+                  <th className="px-2 py-2">{copy.adminUserAgent}</th>
+                  <th className="px-2 py-2">{copy.adminCreatedAt}</th>
                 </tr>
               </thead>
               <tbody>
@@ -70,28 +65,28 @@ export function AdminActivityPage({
                     key={item.id}
                     className="border-t border-black/5 text-slate-700 dark:border-white/10 dark:text-white/75"
                   >
-                    <td className="px-3 py-3">
-                      <div className="min-w-[14rem]">
+                    <td className="px-2 py-2">
+                      <div className="min-w-[11rem]">
                         <div className="font-medium text-slate-900 dark:text-white">
                           {item.user_display_name || item.user_email || item.email_attempt || "-"}
                         </div>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-white/45">
+                        <div className="text-[11px] text-slate-500 dark:text-white/45">
                           {item.user_email || item.email_attempt || "-"}
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3">{item.login_method}</td>
-                    <td className="px-3 py-3">
+                    <td className="px-2 py-2">{item.login_method}</td>
+                    <td className="px-2 py-2">
                       <AdminBadge label={item.login_status} tone={toStatusTone(item.login_status)} />
                     </td>
-                    <td className="px-3 py-3">{item.failure_reason || "-"}</td>
-                    <td className="px-3 py-3">{item.ip_address || "-"}</td>
-                    <td className="px-3 py-3">
-                      <div className="max-w-[18rem] break-words text-xs text-slate-500 dark:text-white/45">
+                    <td className="px-2 py-2">{item.failure_reason || "-"}</td>
+                    <td className="px-2 py-2">{item.ip_address || "-"}</td>
+                    <td className="px-2 py-2">
+                      <div className="max-w-[14rem] truncate text-[11px] text-slate-500 dark:text-white/45">
                         {item.user_agent || "-"}
                       </div>
                     </td>
-                    <td className="px-3 py-3">{formatAdminDateTime(item.created_at)}</td>
+                    <td className="px-2 py-2">{formatAdminDateTime(item.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -99,22 +94,22 @@ export function AdminActivityPage({
           )}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600 dark:text-white/60">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-white/60">
           <div>
             {copy.adminShowing} {items.length} {copy.adminOf} {formatAdminNumber(loginEvents?.total ?? 0)}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => onPageChange(Math.max(1, activityPage - 1))}
               disabled={!canGoPrevious}
-              className="rounded-full border border-black/10 px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
+              className="rounded-full border border-black/10 px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
             >
               {copy.adminPrevious}
             </button>
             <button
               onClick={() => onPageChange(activityPage + 1)}
               disabled={!canGoNext}
-              className="rounded-full border border-black/10 px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
+              className="rounded-full border border-black/10 px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
             >
               {copy.adminNext}
             </button>

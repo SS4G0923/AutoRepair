@@ -325,7 +325,13 @@ export interface BillingPlan {
 
 export interface BillingPaymentMethod {
   code: PaymentMethodCode;
-  mode: "sandbox" | "manual" | "live";
+  provider_code: string;
+  provider_name: string;
+  display_mode: "card_form" | "paypal_buttons" | "qr_code";
+  integration_status: "ready" | "missing_config";
+  missing_config: string[];
+  script_url: string | null;
+  public_config: Record<string, unknown>;
   is_configured: boolean;
 }
 
@@ -361,6 +367,17 @@ export interface BillingOrderItem {
   session_status: string | null;
   redirect_url: string | null;
   qr_code_text: string | null;
+  qr_code_url: string | null;
+  provider_code: string;
+  provider_name: string;
+  display_mode: string;
+  integration_status: string | null;
+  missing_config: string[];
+  script_url: string | null;
+  public_config: Record<string, unknown>;
+  notify_url: string | null;
+  return_url: string | null;
+  next_action_path: string | null;
   instructions: string;
   created_at: string;
   updated_at: string;
@@ -374,13 +391,32 @@ export interface BillingOrderSummary {
 }
 
 export interface BillingSummaryData {
-  payment_mode: "sandbox" | "manual" | "live";
+  payment_environment: "prepare" | "live";
   plans: BillingPlan[];
   payment_methods: BillingPaymentMethod[];
   orders: BillingOrderItem[];
   order_summary: BillingOrderSummary;
   current_subscription: BillingSubscription | null;
   user: AuthenticatedUser;
+}
+
+export interface BillingOrderSession {
+  order: BillingOrderItem;
+  session: {
+    provider_code: string;
+    provider_name: string;
+    display_mode: string;
+    integration_status: string;
+    missing_config: string[];
+    script_url: string | null;
+    public_config: Record<string, unknown>;
+    notify_url: string | null;
+    return_url: string | null;
+    next_action_path: string | null;
+    instructions: string;
+    qr_code_url: string | null;
+    qr_code_text: string | null;
+  };
 }
 
 export interface AdminPaymentOrderItem extends BillingOrderItem {

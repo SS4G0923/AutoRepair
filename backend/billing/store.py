@@ -1,37 +1,15 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 from datetime import datetime
 from typing import Any
 
 from backend.auth.store import get_db_connection, get_user_by_id
+from backend.billing.providers import build_checkout_payload, payment_environment, payment_provider_profile
 
 SUPPORTED_PAYMENT_METHODS = ("card", "paypal", "wechat", "alipay")
 SUPPORTED_USER_ROLES = ("basic", "advanced", "admin")
-PAYMENT_CHECKOUT_URL_ENVS = {
-    "card": "AUTOREPAIR_CARD_CHECKOUT_URL",
-    "paypal": "AUTOREPAIR_PAYPAL_CHECKOUT_URL",
-    "wechat": "AUTOREPAIR_WECHAT_CHECKOUT_URL",
-    "alipay": "AUTOREPAIR_ALIPAY_CHECKOUT_URL",
-}
-
-
-def _payment_mode() -> str:
-    mode = os.getenv("AUTOREPAIR_PAYMENT_MODE", "sandbox").strip().lower()
-    if mode in {"sandbox", "manual", "live"}:
-        return mode
-    return "sandbox"
-
-
-def _format_checkout_url(template: str | None, *, order_no: str) -> str | None:
-    if not template:
-        return None
-    try:
-        return template.format(order_no=order_no)
-    except Exception:
-        return template
 
 
 def _generate_order_no() -> str:
@@ -92,6 +70,12 @@ def _serialize_order(
     instructions = ""
     if isinstance(payload, dict):
         instructions = str(payload.get("instructions") or "")
+    missing_config = payload.get("missing_config") if isinstance(payload, dict) else []
+    if not isinstance(missing_config, list):
+        missing_config = []
+    public_config = payload.get("public_config") if isinstance(payload, dict) else {}
+    if not isinstance(public_config, dict):
+        public_config = {}
 
     return {
         "id": int(row["id"]),
@@ -111,6 +95,19 @@ def _serialize_order(
         "session_status": session_row.get("session_status") if session_row else None,
         "redirect_url": session_row.get("redirect_url") if session_row else None,
         "qr_code_text": session_row.get("qr_code_text") if session_row else None,
+        "qr_code_url": payload.get("qr_code_url") if isinstance(payload, dict) else None,
+        "provider_code": payload.get("provider_code") if isinstance(payload, dict) else row["payment_method"],
+        "provider_name": payload.get("provider_name") if isinstance(payload, dict) else row["payment_method"],
+        "display_mode": payload.get("display_mode") if isinstance(payload, dict) else row["checkout_action"],
+        "integration_status": (
+            payload.get("integration_status") if isinstance(payload, dict) else row["provider_status"]
+        ),
+        "missing_config": [str(item) for item in missing_config if item],
+        "script_url": payload.get("script_url") if isinstance(payload, dict) else None,
+        "public_config": public_config,
+        "notify_url": payload.get("notify_url") if isinstance(payload, dict) else None,
+        "return_url": payload.get("return_url") if isinstance(payload, dict) else None,
+        "next_action_path": payload.get("next_action_path") if isinstance(payload, dict) else None,
         "instructions": instructions,
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
@@ -119,57 +116,42 @@ def _serialize_order(
 
 
 def list_payment_methods() -> list[dict[str, Any]]:
-    mode = _payment_mode()
     return [
         {
             "code": method,
-            "mode": mode,
-            "is_configured": bool(os.getenv(PAYMENT_CHECKOUT_URL_ENVS[method])),
+            "provider_code": profile["provider_code"],
+            "provider_name": profile["provider_name"],
+            "display_mode": profile["display_mode"],
+            "integration_status": profile["integration_status"],
+            "missing_config": profile["missing_config"],
+            "is_configured": profile["integration_status"] == "ready",
+            "script_url": profile["script_url"],
+            "public_config": profile["public_config"],
         }
         for method in SUPPORTED_PAYMENT_METHODS
+        for profile in [payment_provider_profile(method)]
     ]
 
 
 def _build_checkout_payload(
     *,
     payment_method: str,
+    order_id: int,
     order_no: str,
     plan_name: str,
     amount_cents: int,
     currency: str,
+    user_email: str | None = None,
 ) -> dict[str, Any]:
-    configured_url = _format_checkout_url(
-        os.getenv(PAYMENT_CHECKOUT_URL_ENVS[payment_method]),
+    return build_checkout_payload(
+        payment_method=payment_method,
+        order_id=order_id,
         order_no=order_no,
+        plan_name=plan_name,
+        amount_cents=amount_cents,
+        currency=currency,
+        user_email=user_email,
     )
-    mode = _payment_mode()
-    amount_value = f"{amount_cents / 100:.2f} {currency}"
-    if mode == "live" and configured_url:
-        instructions = f"Continue to the provider checkout page to complete payment for {plan_name}."
-        action = "redirect"
-    elif mode == "manual":
-        instructions = (
-            f"Create the payment on {payment_method} for {plan_name} ({amount_value}), then ask an admin to confirm the order."
-        )
-        action = "manual_review"
-    else:
-        instructions = (
-            f"Sandbox checkout is active. Submit this {payment_method} order, then click the sandbox completion button to simulate a successful payment."
-        )
-        action = "sandbox"
-
-    qr_code_text = None
-    if payment_method in {"wechat", "alipay"}:
-        qr_code_text = f"{payment_method.upper()}::{order_no}::{amount_cents}"
-
-    return {
-        "mode": mode,
-        "action": action,
-        "instructions": instructions,
-        "sandbox_enabled": action == "sandbox",
-        "checkout_url": configured_url if action == "redirect" else None,
-        "qr_code_text": qr_code_text,
-    }
 
 
 def _get_plan_by_code(cursor, plan_code: str) -> dict[str, Any] | None:
@@ -428,7 +410,7 @@ def list_payment_orders_for_user(user_id: int, *, limit: int = 20) -> dict[str, 
 def get_billing_summary_for_user(user_id: int) -> dict[str, Any]:
     orders_payload = list_payment_orders_for_user(user_id)
     return {
-        "payment_mode": _payment_mode(),
+        "payment_environment": payment_environment(),
         "plans": list_subscription_plans(active_only=True),
         "payment_methods": list_payment_methods(),
         "orders": orders_payload["orders"],
@@ -631,14 +613,12 @@ def create_payment_order_for_user(
             if plan_row is None:
                 raise ValueError("Subscription plan was not found.")
 
+            user = get_user_by_id(user_id)
+            if user is None:
+                raise ValueError("User was not found.")
+
             order_no = _generate_order_no()
-            checkout_payload = _build_checkout_payload(
-                payment_method=payment_method,
-                order_no=order_no,
-                plan_name=str(plan_row["plan_name"]),
-                amount_cents=int(plan_row["amount_cents"]),
-                currency=str(plan_row["currency"]),
-            )
+            profile = payment_provider_profile(payment_method, currency=str(plan_row["currency"]))
 
             cursor.execute(
                 """
@@ -669,11 +649,20 @@ def create_payment_order_for_user(
                     int(plan_row["amount_cents"]),
                     plan_row["currency"],
                     payment_method,
-                    checkout_payload["action"],
-                    checkout_payload["checkout_url"],
+                    profile["display_mode"],
+                    None,
                 ),
             )
             order_id = int(cursor.lastrowid)
+            checkout_payload = _build_checkout_payload(
+                payment_method=payment_method,
+                order_id=order_id,
+                order_no=order_no,
+                plan_name=str(plan_row["plan_name"]),
+                amount_cents=int(plan_row["amount_cents"]),
+                currency=str(plan_row["currency"]),
+                user_email=str(user["email"]),
+            )
 
             cursor.execute(
                 """
@@ -692,7 +681,7 @@ def create_payment_order_for_user(
                 (
                     order_id,
                     payment_method,
-                    "ready",
+                    "pending_provider_init" if checkout_payload["integration_status"] == "ready" else "missing_config",
                     f"{payment_method}-{order_no.lower()}",
                     None,
                     checkout_payload["checkout_url"],
@@ -710,7 +699,7 @@ def create_payment_order_for_user(
                 payload={
                     "plan_code": plan_row["plan_code"],
                     "payment_method": payment_method,
-                    "payment_mode": _payment_mode(),
+                    "payment_environment": payment_environment(),
                 },
             )
         connection.commit()
@@ -722,6 +711,40 @@ def create_payment_order_for_user(
     if order_row is None:
         raise RuntimeError("Payment order could not be reloaded.")
     return _serialize_order(order_row, session_row=session_row)
+
+
+def get_payment_order_for_user(*, user_id: int, order_id: int) -> dict[str, Any]:
+    with get_db_connection() as connection:
+        with connection.cursor() as cursor:
+            order_row = _fetch_order(cursor, order_id)
+            if order_row is None:
+                raise ValueError("Payment order was not found.")
+            if int(order_row["user_id"]) != user_id:
+                raise PermissionError("This order does not belong to the current user.")
+            session_row = _fetch_latest_provider_session(cursor, order_id)
+    return _serialize_order(order_row, session_row=session_row)
+
+
+def get_payment_order_session_for_user(*, user_id: int, order_id: int) -> dict[str, Any]:
+    order = get_payment_order_for_user(user_id=user_id, order_id=order_id)
+    return {
+        "order": order,
+        "session": {
+            "provider_code": order.get("provider_code"),
+            "provider_name": order.get("provider_name"),
+            "display_mode": order.get("display_mode"),
+            "integration_status": order.get("integration_status"),
+            "missing_config": order.get("missing_config") or [],
+            "script_url": order.get("script_url"),
+            "public_config": order.get("public_config") or {},
+            "notify_url": order.get("notify_url"),
+            "return_url": order.get("return_url"),
+            "next_action_path": order.get("next_action_path"),
+            "instructions": order.get("instructions"),
+            "qr_code_url": order.get("qr_code_url"),
+            "qr_code_text": order.get("qr_code_text"),
+        },
+    }
 
 
 def _mark_order_paid(
@@ -833,38 +856,7 @@ def _mark_order_paid(
 
 
 def complete_payment_order_in_sandbox(*, user_id: int, order_id: int) -> dict[str, Any]:
-    if _payment_mode() != "sandbox":
-        raise ValueError("Sandbox completion is disabled.")
-
-    with get_db_connection() as connection:
-        with connection.cursor() as cursor:
-            order_row = _fetch_order_for_update(cursor, order_id)
-            if order_row is None:
-                raise ValueError("Payment order was not found.")
-            if int(order_row["user_id"]) != user_id:
-                raise PermissionError("This order does not belong to the current user.")
-
-            payment_result = _mark_order_paid(
-                cursor,
-                order_row=order_row,
-                actor_user_id=user_id,
-                actor_role="user",
-                provider_reference="sandbox_paid",
-                note="Completed by sandbox checkout.",
-            )
-        connection.commit()
-
-    with get_db_connection() as connection:
-        with connection.cursor() as cursor:
-            order = _fetch_order(cursor, order_id)
-            session_row = _fetch_latest_provider_session(cursor, order_id)
-    if order is None:
-        raise RuntimeError("Completed order could not be reloaded.")
-    return {
-        "order": _serialize_order(order, session_row=session_row),
-        "subscription": payment_result["subscription"],
-        "user": get_user_by_id(user_id),
-    }
+    raise ValueError("Sandbox payment flow has been disabled. Configure a real payment provider instead.")
 
 
 def update_user_role_by_admin(
