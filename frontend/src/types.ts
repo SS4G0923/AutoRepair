@@ -12,7 +12,7 @@ export type AdminPage = "dashboard" | "users" | "requests" | "models" | "activit
 export type PaymentMethodCode = "card" | "paypal" | "wechat" | "alipay";
 export type PaymentOrderStatus = "pending" | "paid" | "rejected" | "cancelled" | "failed";
 
-export type CodeLanguage = "python" | "javascript" | "typescript" | "java" | "go";
+export type CodeLanguage = "python" | "javascript" | "typescript" | "java" | "go" | "c" | "cpp";
 export type ModelOptionValue = string;
 
 export interface LanguageOption {

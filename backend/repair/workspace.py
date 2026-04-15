@@ -13,22 +13,36 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
+from backend.repair.languages import (
+    default_entrypoint_for_language,
+    get_language_spec,
+)
+
 
 MAX_PROJECT_FILES = 400
 MAX_ARCHIVE_BYTES = 12 * 1024 * 1024
 MAX_ANALYZED_TEXT_FILES = 300
 MAX_ANALYZED_FILE_BYTES = 200_000
 MAX_ANALYZED_TOTAL_BYTES = 1_500_000
-ENTRYPOINT_CANDIDATES = (
-    "main.py",
-    "app.py",
-    "run.py",
-    "manage.py",
-    "__main__.py",
-    "src/main.py",
-)
 TEXT_FILE_SUFFIXES = {
     ".py",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".mts",
+    ".cts",
+    ".java",
+    ".go",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".c++",
+    ".h",
+    ".hpp",
+    ".hh",
+    ".hxx",
     ".txt",
     ".md",
     ".json",
@@ -52,9 +66,10 @@ class ProjectFileInput:
 class PreparedProjectWorkspace:
     source_type: str
     root_dir: Path
+    language: str
     entrypoint: str
     file_map: dict[str, str]
-    python_files: dict[str, str]
+    language_files: dict[str, str]
     module_to_path: dict[str, str]
     dependency_graph: dict[str, list[str]]
     reverse_dependency_graph: dict[str, list[str]]
@@ -72,16 +87,17 @@ class PreparedProjectWorkspace:
         return {
             "source_type": self.source_type,
             "source_label": self.source_label,
+            "language": self.language,
             "entrypoint": self.entrypoint,
             "file_count": len(self.file_map),
-            "python_file_count": len(self.python_files),
+            "language_file_count": len(self.language_files),
             "files": self.all_paths[:120],
             "entrypoint_dependencies": self.dependency_graph.get(self.entrypoint, []),
             "entrypoint_reverse_dependencies": self.reverse_dependency_graph.get(self.entrypoint, []),
         }
 
 
-def normalize_project_path(raw_path: str, *, require_python: bool = False) -> str:
+def normalize_project_path(raw_path: str, *, required_suffixes: tuple[str, ...] | None = None) -> str:
     value = raw_path.strip().replace("\\", "/")
     if not value:
         raise ValueError("Path must be a non-empty string.")
@@ -91,8 +107,9 @@ def normalize_project_path(raw_path: str, *, require_python: bool = False) -> st
     if not pure.name:
         raise ValueError("Path must point to a file.")
     normalized = pure.as_posix()
-    if require_python and not normalized.endswith(".py"):
-        raise ValueError("Entrypoint must be a `.py` file.")
+    if required_suffixes and PurePosixPath(normalized).suffix.lower() not in required_suffixes:
+        allowed = ", ".join(required_suffixes)
+        raise ValueError(f"Entrypoint must use one of these suffixes: {allowed}.")
     return normalized
 
 
@@ -169,10 +186,15 @@ def _is_probably_text_file(path: Path) -> bool:
     return False
 
 
-def _read_analyzable_files(source_root: Path) -> tuple[dict[str, str], dict[str, str]]:
+def _read_analyzable_files(
+    source_root: Path,
+    *,
+    language: str,
+) -> tuple[dict[str, str], dict[str, str]]:
     file_map: dict[str, str] = {}
-    python_files: dict[str, str] = {}
+    language_files: dict[str, str] = {}
     total_bytes = 0
+    language_suffixes = get_language_spec(language).source_extensions
     paths = sorted(
         path
         for path in source_root.rglob("*")
@@ -201,10 +223,10 @@ def _read_analyzable_files(source_root: Path) -> tuple[dict[str, str], dict[str,
         relative_path = path.relative_to(source_root).as_posix()
         file_map[relative_path] = content
         total_bytes += file_size
-        if path.suffix.lower() == ".py":
-            python_files[relative_path] = content
+        if path.suffix.lower() in language_suffixes:
+            language_files[relative_path] = content
 
-    return file_map, python_files
+    return file_map, language_files
 
 
 def _build_module_map(python_files: dict[str, str]) -> dict[str, str]:
@@ -303,21 +325,34 @@ def _build_dependency_graph(
     return dependency_graph, reverse_dependency_graph
 
 
-def _guess_entrypoint(file_map: dict[str, str], requested_entrypoint: str | None) -> str:
+def _guess_entrypoint(
+    file_map: dict[str, str],
+    requested_entrypoint: str | None,
+    *,
+    language: str,
+) -> str:
+    language_spec = get_language_spec(language)
     if requested_entrypoint:
-        normalized = normalize_project_path(requested_entrypoint, require_python=True)
+        normalized = normalize_project_path(
+            requested_entrypoint,
+            required_suffixes=language_spec.source_extensions,
+        )
         if normalized in file_map:
             return normalized
         raise ValueError(f"Entrypoint `{normalized}` was not found in the prepared project.")
 
-    for candidate in ENTRYPOINT_CANDIDATES:
+    for candidate in language_spec.entrypoint_candidates:
         if candidate in file_map:
             return candidate
 
-    python_candidates = sorted(path for path in file_map if path.endswith(".py"))
-    if python_candidates:
-        return python_candidates[0]
-    raise ValueError("Could not determine a Python entrypoint from the provided project.")
+    language_candidates = sorted(
+        path for path in file_map if PurePosixPath(path).suffix.lower() in language_spec.source_extensions
+    )
+    if language_candidates:
+        return language_candidates[0]
+    raise ValueError(
+        f"Could not determine a {language_spec.display_name} entrypoint from the provided project."
+    )
 
 
 def build_project_runtime_inspection_report(
@@ -328,6 +363,7 @@ def build_project_runtime_inspection_report(
 
     return build_report(
         file_map=workspace.file_map,
+        language=workspace.language,
         entrypoint=workspace.entrypoint,
         project_root=workspace.root_dir,
         dependency_graph=workspace.dependency_graph,
@@ -343,6 +379,7 @@ def prepare_project_workspace(
     *,
     code: str | None,
     filename: str | None,
+    language: str,
     project_files: tuple[ProjectFileInput, ...],
     project_zip_base64: str | None,
     github_repo_url: str | None,
@@ -366,7 +403,11 @@ def prepare_project_workspace(
         source_label = "inline-code"
 
         if code is not None:
-            entrypoint = normalize_project_path(filename or "main.py", require_python=True)
+            language_spec = get_language_spec(language)
+            entrypoint = normalize_project_path(
+                filename or default_entrypoint_for_language(language),
+                required_suffixes=language_spec.source_extensions,
+            )
             _write_project_file(source_root, entrypoint, code)
         elif project_files:
             source_type = "project_files"
@@ -394,23 +435,29 @@ def prepare_project_workspace(
             if not source_root.is_dir():
                 raise ValueError(f"`project_subdir` was not found: {normalized_subdir}")
 
-        file_map, python_files = _read_analyzable_files(source_root)
+        file_map, language_files = _read_analyzable_files(source_root, language=language)
         if not file_map:
             raise ValueError("No analyzable text files were found in the provided project.")
 
-        resolved_entrypoint = _guess_entrypoint(file_map, entrypoint)
-        module_to_path = _build_module_map(python_files)
-        dependency_graph, reverse_dependency_graph = _build_dependency_graph(
-            python_files,
-            module_to_path,
-        )
+        resolved_entrypoint = _guess_entrypoint(file_map, entrypoint, language=language)
+        if language == "python":
+            module_to_path = _build_module_map(language_files)
+            dependency_graph, reverse_dependency_graph = _build_dependency_graph(
+                language_files,
+                module_to_path,
+            )
+        else:
+            module_to_path = {}
+            dependency_graph = {}
+            reverse_dependency_graph = {}
 
         yield PreparedProjectWorkspace(
             source_type=source_type,
             root_dir=source_root,
+            language=language,
             entrypoint=resolved_entrypoint,
             file_map=file_map,
-            python_files=python_files,
+            language_files=language_files,
             module_to_path=module_to_path,
             dependency_graph=dependency_graph,
             reverse_dependency_graph=reverse_dependency_graph,

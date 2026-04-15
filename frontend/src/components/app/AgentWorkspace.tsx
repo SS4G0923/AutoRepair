@@ -28,7 +28,7 @@ interface AgentWorkspaceProps {
   locale: UiLocale;
   model: ModelOptionValue;
   projectSubdir: string;
-  pythonSupported: boolean;
+  languageSupported: boolean;
   runResult: RunResult | null;
   stages: Record<StageName, StageState>;
   status: SessionStatus;
@@ -68,7 +68,7 @@ export function AgentWorkspace({
   locale,
   model,
   projectSubdir,
-  pythonSupported,
+  languageSupported,
   runResult,
   stages,
   status,
@@ -94,7 +94,7 @@ export function AgentWorkspace({
   return (
     <div className={workspaceMainClass}>
       <div className="grid h-full min-h-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden pr-1">
+        <section className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pr-1">
           <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
             <div className="shrink-0 flex flex-col gap-4">
               <div className={`flex gap-3 ${agentSourceType === "single_file" ? "items-start" : "items-center"}`}>
@@ -120,32 +120,18 @@ export function AgentWorkspace({
                   ))}
                 </div>
 
-                {agentSourceType === "single_file" ? (
-                  <div className="flex min-w-[180px] flex-col gap-2">
-                    <select
-                      value={language}
-                      onChange={(event) => onLanguageChange(event.target.value as CodeLanguage)}
-                      className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-                    >
-                      {languageOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={model}
-                      onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
-                      className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-                    >
-                      {modelOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {copy.model}: {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
+                <div className="flex min-w-[180px] flex-col gap-2">
+                  <select
+                    value={language}
+                    onChange={(event) => onLanguageChange(event.target.value as CodeLanguage)}
+                    className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                  >
+                    {languageOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                   <select
                     value={model}
                     onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
@@ -157,7 +143,7 @@ export function AgentWorkspace({
                       </option>
                     ))}
                   </select>
-                )}
+                </div>
               </div>
 
               {agentSourceType === "single_file" ? null : agentSourceType === "zip" ? (
@@ -264,7 +250,7 @@ export function AgentWorkspace({
               ) : null}
             </div>
 
-            {!pythonSupported ? (
+            {!languageSupported ? (
               <div className="mt-4 shrink-0 rounded-3xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-200">
                 {copy.unsupported}
               </div>
@@ -274,7 +260,7 @@ export function AgentWorkspace({
               {agentSourceType === "single_file" ? (
                 <CodeEditor value={code} onChange={onCodeChange} placeholder={copy.placeholder} />
               ) : (
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-black/5 bg-black/[0.03] p-5 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[28px] border border-black/5 bg-black/[0.03] p-5 dark:border-white/10 dark:bg-white/[0.03]">
                   <div className="grid gap-4 lg:grid-cols-2">
                     <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70">
                       <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
@@ -320,7 +306,7 @@ export function AgentWorkspace({
             <div className="mt-3 shrink-0 flex flex-wrap items-center gap-2">
               <button
                 onClick={onSend}
-                disabled={status === "streaming" || !pythonSupported}
+                disabled={status === "streaming" || !languageSupported}
                 className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
               >
                 {copy.send}
@@ -338,10 +324,10 @@ export function AgentWorkspace({
               >
                 {copy.reset}
               </button>
-              <div className="rounded-full border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-white/70">
-                {statusText}
+                <div className="rounded-full border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-white/70">
+                  {statusText}
+                </div>
               </div>
-            </div>
           </div>
         </section>
 

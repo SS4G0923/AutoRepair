@@ -34,6 +34,7 @@ class FunctionTool:
 
 @dataclass(frozen=True)
 class RepairToolContext:
+    language: str
     entrypoint: str
     file_map: dict[str, str]
     runtime_report: dict[str, Any] | None = None
@@ -373,7 +374,7 @@ def build_repair_tools(context: RepairToolContext) -> list[FunctionTool]:
             "reverse_dependencies": reverse_dependency_graph.get(path, []),
         }
 
-    return [
+    tools = [
         FunctionTool(
             name="get_failure_summary",
             description="Return the structured runtime failure summary, traceback frames, and project focus snippet.",
@@ -438,43 +439,51 @@ def build_repair_tools(context: RepairToolContext) -> list[FunctionTool]:
             },
             handler=search_source,
         ),
-        FunctionTool(
-            name="list_symbols",
-            description="List top-level imports, functions, and classes in one Python file or across the whole project.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "project_scope": {"type": "boolean"},
-                },
-                "additionalProperties": False,
-            },
-            handler=list_symbols,
-        ),
-        FunctionTool(
-            name="get_symbol_source",
-            description="Return the exact source for a top-level function, class, or class method by name across the project.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "symbol_name": {"type": "string"},
-                    "path": {"type": "string"},
-                },
-                "required": ["symbol_name"],
-                "additionalProperties": False,
-            },
-            handler=get_symbol_source,
-        ),
-        FunctionTool(
-            name="get_file_dependencies",
-            description="Return direct dependency and reverse-dependency files for a Python file in the project.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                },
-                "additionalProperties": False,
-            },
-            handler=get_file_dependencies,
-        ),
     ]
+
+    if context.language == "python":
+        tools.extend(
+            [
+                FunctionTool(
+                    name="list_symbols",
+                    description="List top-level imports, functions, and classes in one Python file or across the whole project.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "project_scope": {"type": "boolean"},
+                        },
+                        "additionalProperties": False,
+                    },
+                    handler=list_symbols,
+                ),
+                FunctionTool(
+                    name="get_symbol_source",
+                    description="Return the exact source for a top-level function, class, or class method by name across the project.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "symbol_name": {"type": "string"},
+                            "path": {"type": "string"},
+                        },
+                        "required": ["symbol_name"],
+                        "additionalProperties": False,
+                    },
+                    handler=get_symbol_source,
+                ),
+                FunctionTool(
+                    name="get_file_dependencies",
+                    description="Return direct dependency and reverse-dependency files for a Python file in the project.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                        },
+                        "additionalProperties": False,
+                    },
+                    handler=get_file_dependencies,
+                ),
+            ]
+        )
+
+    return tools

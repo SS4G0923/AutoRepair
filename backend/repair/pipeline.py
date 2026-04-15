@@ -11,6 +11,11 @@ from backend.inspector.inspector_prompt import build_planner_prompt
 from backend.llm import call_llm_for_json
 from backend.llm.agent_tools import RepairToolContext, build_repair_tools
 from backend.llm.telemetry import LLMCallContext
+from backend.repair.languages import (
+    default_entrypoint_for_language,
+    get_language_spec,
+    normalize_language,
+)
 from backend.repair.workspace import (
     ProjectFileInput,
     build_project_runtime_inspection_report,
@@ -18,14 +23,14 @@ from backend.repair.workspace import (
     normalize_project_path,
     prepare_project_workspace,
 )
-from backend.repair.sandbox import run_python_project_safely
+from backend.repair.sandbox import run_project_safely
 
 DEFAULT_MODEL = "qwen3.5-flash"
 MAX_CODE_CHARS = 100_000
 MAX_TIMEOUT_SEC = 30
 
-INSPECTOR_JSON_SYSTEM_PROMPT = """You are an expert bug inspection agent.
-You will receive a structured local runtime report for an uploaded Python file or project.
+INSPECTOR_JSON_SYSTEM_PROMPT_TEMPLATE = """You are an expert bug inspection agent.
+You will receive a structured local runtime report for an uploaded {language_name} file or project.
 Return a compact JSON object that is directly useful for planning and fixing the bug.
 
 Requirements:
@@ -52,8 +57,8 @@ PLAN_EXPLAIN_SYSTEM_PROMPT = """你是一个优秀的代码 Bug 修复计划师�
 报告中需要包含：我对修复目标的理解、我会如何最小化修改、我会如何验证改动。
 直接输出正文，不要添加开场白和结束语。"""
 
-CODE_SYSTEM_PROMPT = """You are a senior Python repair agent.
-You will be given a failing Python file or project, its runtime evidence, and a repair plan.
+CODE_SYSTEM_PROMPT_TEMPLATE = """You are a senior {language_name} repair agent.
+You will be given a failing {language_name} file or project, its runtime evidence, and a repair plan.
 Return ONLY a unified git diff for the original project.
 
 Rules:
@@ -103,8 +108,20 @@ Rules:
 
 VERIFY_EXPLAIN_SYSTEM_PROMPT = """你是一个优秀的代码修复验证工程师。
 请基于验证计划和验证执行结果，输出一份第一人称 explain 报告。
-报告中需要包含：我设计了哪些断言、为什么这些断言能覆盖原始问题、验证最终是否通过、还有什么残余风险。
+报告中需要包含：我设计了哪些验证条件、为什么这些验证条件能覆盖原始问题、验证最终是否通过、还有什么残余风险。
 直接输出正文，不要添加开场白和结束语。"""
+
+
+def _render_inspector_system_prompt(language: str) -> str:
+    return INSPECTOR_JSON_SYSTEM_PROMPT_TEMPLATE.format(
+        language_name=get_language_spec(language).display_name
+    )
+
+
+def _render_code_system_prompt(language: str) -> str:
+    return CODE_SYSTEM_PROMPT_TEMPLATE.format(
+        language_name=get_language_spec(language).display_name
+    )
 
 EventEmitter = Callable[[str, dict[str, Any]], None]
 
@@ -205,18 +222,20 @@ class RepairRequest:
                 raise ValueError(f"`code` must be at most {MAX_CODE_CHARS} characters.")
             normalized_code = code
 
-        language = payload.get("language", "python")
-        if language != "python":
-            raise ValueError("Only `python` is supported by the secure local runner.")
+        language = normalize_language(payload.get("language", "python"))
+        language_spec = get_language_spec(language)
 
         raw_filename = payload.get("filename")
         filename: str | None = None
         if raw_filename is not None:
             if not isinstance(raw_filename, str) or not raw_filename.strip():
                 raise ValueError("`filename` must be a non-empty string when provided.")
-            filename = normalize_project_path(raw_filename, require_python=True)
+            filename = normalize_project_path(
+                raw_filename,
+                required_suffixes=language_spec.source_extensions,
+            )
         elif normalized_code is not None:
-            filename = "main.py"
+            filename = default_entrypoint_for_language(language)
 
         timeout_sec = payload.get("timeout_sec", 5)
         if not isinstance(timeout_sec, int):
@@ -331,22 +350,24 @@ def _looks_like_unified_diff(text: str) -> bool:
     return has_headers and has_hunk or has_hunk
 
 
-def _extract_python_code_candidate(text: str) -> str | None:
+def _extract_source_code_candidate(text: str, *, language: str) -> str | None:
+    language_spec = get_language_spec(language)
     fenced = _extract_first_fenced_block(text)
     if fenced is not None:
         label, body = fenced
         if label in {"diff", "patch"}:
             return None
-        if body:
+        if not label or label in language_spec.code_fence_labels:
             return body
 
     stripped = text.strip()
     if not stripped or _looks_like_unified_diff(stripped):
         return None
-    try:
-        ast.parse(stripped)
-    except SyntaxError:
-        return None
+    if language == "python":
+        try:
+            ast.parse(stripped)
+        except SyntaxError:
+            return None
     return stripped
 
 
@@ -495,6 +516,7 @@ def _coerce_model_output_to_diff(
     *,
     original_files: dict[str, str],
     entrypoint: str,
+    language: str,
 ) -> str:
     cleaned = _normalize_diff(raw_output)
     if not cleaned:
@@ -517,10 +539,10 @@ def _coerce_model_output_to_diff(
         if canonical_diff:
             return canonical_diff
 
-    python_candidate = _extract_python_code_candidate(raw_output)
-    if python_candidate is not None and len(original_files) == 1:
+    source_candidate = _extract_source_code_candidate(raw_output, language=language)
+    if source_candidate is not None and len(original_files) == 1:
         only_path = next(iter(original_files.keys()))
-        canonical_diff = _render_unified_diff(original_files[only_path], python_candidate, only_path)
+        canonical_diff = _render_unified_diff(original_files[only_path], source_candidate, only_path)
         if canonical_diff:
             return canonical_diff
 
@@ -782,6 +804,34 @@ def _build_verification_base_source(patched_code: str, filename: str) -> tuple[s
     return f"{base_source}\n", skipped_descriptions
 
 
+def _build_runtime_only_verification_report(
+    *,
+    language: str,
+    patched_execution: Any,
+    modified_files: list[str],
+) -> dict[str, Any]:
+    language_name = get_language_spec(language).display_name
+    passed = bool(patched_execution is not None and patched_execution.ok)
+    if passed:
+        summary = f"Patched {language_name} project re-ran successfully with a clean exit status."
+    elif patched_execution is not None and patched_execution.timed_out:
+        summary = f"Patched {language_name} project timed out during verification rerun."
+    else:
+        summary = f"Patched {language_name} project still failed during verification rerun."
+
+    return {
+        "summary": summary,
+        "verification_strategy": "runtime_rerun_only",
+        "assertion_targets": [
+            "program exits successfully after applying the patch",
+            "stderr no longer contains the original failure signal",
+        ],
+        "assert_count": 0,
+        "modified_files": modified_files,
+        "passed": passed,
+    }
+
+
 def _emit_stage(emit: EventEmitter, stage: str, status: str, **payload: Any) -> None:
     emit(
         "stage",
@@ -1004,6 +1054,7 @@ def run_repair_pipeline(
     with prepare_project_workspace(
         code=request.code,
         filename=request.filename,
+        language=request.language,
         project_files=request.project_files,
         project_zip_base64=request.project_zip_base64,
         github_repo_url=request.github_repo_url,
@@ -1023,13 +1074,17 @@ def run_repair_pipeline(
             emit,
             "run",
             "started",
-            message="Running uploaded Python project in an isolated local process.",
+            message=(
+                f"Running uploaded {get_language_spec(request.language).display_name} project "
+                "in an isolated local process."
+            ),
             entrypoint=workspace.entrypoint,
             source_type=workspace.source_type,
         )
-        execution = run_python_project_safely(
+        execution = run_project_safely(
             workspace.root_dir,
             filename=workspace.entrypoint,
+            language=request.language,
             timeout_sec=request.timeout_sec,
         )
         emit(
@@ -1059,6 +1114,7 @@ def run_repair_pipeline(
         runtime_report = build_project_runtime_inspection_report(workspace, execution)
         stage_tools = build_repair_tools(
             RepairToolContext(
+                language=request.language,
                 entrypoint=workspace.entrypoint,
                 file_map=workspace.file_map,
                 runtime_report=runtime_report,
@@ -1070,7 +1126,7 @@ def run_repair_pipeline(
         _emit_stage(emit, "inspect", "started")
         inspector_report = call_llm_for_json(
             prompt=json.dumps(runtime_report, ensure_ascii=False, indent=2),
-            system_prompt=INSPECTOR_JSON_SYSTEM_PROMPT,
+            system_prompt=_render_inspector_system_prompt(request.language),
             model=request.model,
             isJson=True,
             tools=stage_tools,
@@ -1127,6 +1183,8 @@ def run_repair_pipeline(
         _emit_stage(emit, "code", "started")
 
         coder_prompt_payload = {
+            "language": request.language,
+            "language_display_name": get_language_spec(request.language).display_name,
             "entrypoint": workspace.entrypoint,
             "project_summary": workspace.to_summary(),
             "runtime_report": runtime_report,
@@ -1184,7 +1242,7 @@ def run_repair_pipeline(
                         ensure_ascii=False,
                         indent=2,
                     ),
-                    system_prompt=CODE_SYSTEM_PROMPT,
+                    system_prompt=_render_code_system_prompt(request.language),
                     model=request.model,
                     isJson=False,
                     stream=False,
@@ -1201,6 +1259,7 @@ def run_repair_pipeline(
                     raw_diff,
                     original_files=workspace.file_map,
                     entrypoint=workspace.entrypoint,
+                    language=request.language,
                 )
                 candidate.patched_files = _apply_unified_diff_to_project(
                     workspace.file_map,
@@ -1272,7 +1331,7 @@ def run_repair_pipeline(
                         ensure_ascii=False,
                         indent=2,
                     ),
-                    system_prompt=CODE_SYSTEM_PROMPT,
+                    system_prompt=_render_code_system_prompt(request.language),
                     model=request.model,
                     isJson=False,
                     stream=True,
@@ -1290,6 +1349,7 @@ def run_repair_pipeline(
                     fallback_raw_diff,
                     original_files=workspace.file_map,
                     entrypoint=workspace.entrypoint,
+                    language=request.language,
                 )
                 fallback_candidate.patched_files = _apply_unified_diff_to_project(
                     workspace.file_map,
@@ -1358,6 +1418,7 @@ def run_repair_pipeline(
             prompt=json.dumps(
                 {
                     "planner_report": planner_report,
+                    "language": request.language,
                     "candidate_generation_report": [
                         _summarize_candidate(candidate)
                         for candidate in patch_candidates
@@ -1397,6 +1458,7 @@ def run_repair_pipeline(
             try:
                 verify_tools = build_repair_tools(
                     RepairToolContext(
+                        language=request.language,
                         entrypoint=workspace.entrypoint,
                         file_map=candidate.patched_files,
                         runtime_report=runtime_report,
@@ -1423,75 +1485,87 @@ def run_repair_pipeline(
                     ensure_ascii=False,
                     indent=2,
                 )
-                raw_verify_report = call_llm_for_json(
-                    prompt=verify_prompt,
-                    system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
-                    model=request.model,
-                    isJson=True,
-                    tools=verify_tools,
-                    tool_event_handler=_build_tool_event_handler(
-                        emit,
-                        "verify",
-                        candidate_label=candidate.label,
-                    ),
-                    audit_context=make_llm_context("verify", f"verify.report.{candidate.key}"),
-                )
-                verification_base_source, skipped_verification_nodes = _build_verification_base_source(
-                    candidate.patched_files.get(workspace.entrypoint, ""),
-                    workspace.entrypoint,
-                )
-                existing_symbol_names = _collect_defined_symbol_names(
-                    verification_base_source,
-                    workspace.entrypoint,
-                )
-                verify_report = _normalize_verification_report(
-                    raw_verify_report,
-                    existing_symbol_names=existing_symbol_names,
-                    filename=workspace.entrypoint,
-                )
-
                 with materialize_patched_workspace(
                     workspace.root_dir,
                     candidate.patched_files,
                     set(workspace.file_map.keys()),
                 ) as patched_root:
-                    candidate.patched_execution = run_python_project_safely(
+                    candidate.patched_execution = run_project_safely(
                         patched_root,
                         filename=workspace.entrypoint,
+                        language=request.language,
                         timeout_sec=request.timeout_sec,
                     )
-
-                verification_script = _build_verification_script(
-                    verification_base_source,
-                    verify_report["verification_code"],
-                )
-                with materialize_patched_workspace(
-                    workspace.root_dir,
-                    candidate.patched_files,
-                    set(workspace.file_map.keys()),
-                ) as verify_root:
-                    verify_target = verify_root / workspace.entrypoint
-                    verify_target.parent.mkdir(parents=True, exist_ok=True)
-                    verify_target.write_text(verification_script, encoding="utf-8")
-                    candidate.verification_execution = run_python_project_safely(
-                        verify_root,
+                if request.language == "python":
+                    raw_verify_report = call_llm_for_json(
+                        prompt=verify_prompt,
+                        system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
+                        model=request.model,
+                        isJson=True,
+                        tools=verify_tools,
+                        tool_event_handler=_build_tool_event_handler(
+                            emit,
+                            "verify",
+                            candidate_label=candidate.label,
+                        ),
+                        audit_context=make_llm_context("verify", f"verify.report.{candidate.key}"),
+                    )
+                    verification_base_source, skipped_verification_nodes = _build_verification_base_source(
+                        candidate.patched_files.get(workspace.entrypoint, ""),
+                        workspace.entrypoint,
+                    )
+                    existing_symbol_names = _collect_defined_symbol_names(
+                        verification_base_source,
+                        workspace.entrypoint,
+                    )
+                    verify_report = _normalize_verification_report(
+                        raw_verify_report,
+                        existing_symbol_names=existing_symbol_names,
                         filename=workspace.entrypoint,
-                        timeout_sec=request.timeout_sec,
                     )
+                    verification_script = _build_verification_script(
+                        verification_base_source,
+                        verify_report["verification_code"],
+                    )
+                    with materialize_patched_workspace(
+                        workspace.root_dir,
+                        candidate.patched_files,
+                        set(workspace.file_map.keys()),
+                    ) as verify_root:
+                        verify_target = verify_root / workspace.entrypoint
+                        verify_target.parent.mkdir(parents=True, exist_ok=True)
+                        verify_target.write_text(verification_script, encoding="utf-8")
+                        candidate.verification_execution = run_project_safely(
+                            verify_root,
+                            filename=workspace.entrypoint,
+                            language=request.language,
+                            timeout_sec=request.timeout_sec,
+                        )
 
-                candidate.verify_passed = bool(
-                    candidate.patched_execution.ok
-                    and candidate.verification_execution.ok
-                )
-                candidate.verification_report = {
-                    **verify_report,
-                    "modified_files": candidate.modified_files,
-                    "passed": candidate.verify_passed,
-                }
-                candidate.verification_stdout = candidate.verification_execution.stdout
-                candidate.verification_stderr = candidate.verification_execution.stderr
-                candidate.verification_base_mode = "definition_only_entrypoint_context"
-                candidate.skipped_top_level_nodes = skipped_verification_nodes
+                    candidate.verify_passed = bool(
+                        candidate.patched_execution.ok
+                        and candidate.verification_execution.ok
+                    )
+                    candidate.verification_report = {
+                        **verify_report,
+                        "modified_files": candidate.modified_files,
+                        "passed": candidate.verify_passed,
+                    }
+                    candidate.verification_stdout = candidate.verification_execution.stdout
+                    candidate.verification_stderr = candidate.verification_execution.stderr
+                    candidate.verification_base_mode = "definition_only_entrypoint_context"
+                    candidate.skipped_top_level_nodes = skipped_verification_nodes
+                else:
+                    candidate.verification_execution = candidate.patched_execution
+                    candidate.verify_passed = bool(candidate.patched_execution.ok)
+                    candidate.verification_report = _build_runtime_only_verification_report(
+                        language=request.language,
+                        patched_execution=candidate.patched_execution,
+                        modified_files=candidate.modified_files,
+                    )
+                    candidate.verification_stdout = candidate.patched_execution.stdout
+                    candidate.verification_stderr = candidate.patched_execution.stderr
+                    candidate.verification_base_mode = "runtime_rerun_only"
             except Exception as exc:
                 candidate.error_message = str(exc)
 
@@ -1514,8 +1588,12 @@ def run_repair_pipeline(
         verify_payload = {
             "collaboration_mode": "multi_candidate_patch_committee",
             "selection_policy": (
-                "Candidates are ranked by patched runtime success, assertion-based verification success, "
-                "assert coverage, and patch size. The highest-ranked candidate is returned automatically."
+                "Candidates are ranked by patched runtime success, verification success, and patch size. "
+                + (
+                    "Python candidates also receive additional credit for assertion coverage."
+                    if request.language == "python"
+                    else "For non-Python languages the verification step uses patched runtime reruns."
+                )
             ),
             "candidate_count": len(ranked_candidates),
             "selected_candidate": _summarize_candidate(
@@ -1559,7 +1637,11 @@ def run_repair_pipeline(
                 "message": (
                     "Verification passed. Review the patch and decide whether to accept it."
                     if selected_candidate.verify_passed
-                    else "Verification failed. The generated patch did not satisfy the assertion checks."
+                    else (
+                        "Verification failed. The generated patch did not satisfy the assertion checks."
+                        if request.language == "python"
+                        else "Verification failed. The generated patch still did not run cleanly after rerun."
+                    )
                 ),
             },
         )

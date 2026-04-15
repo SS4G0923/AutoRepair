@@ -604,7 +604,7 @@ function App() {
                   locale={locale}
                   model={model}
                   projectSubdir={repair.projectSubdir}
-                  pythonSupported={repair.pythonSupported}
+                  languageSupported={repair.languageSupported}
                   runResult={repair.runResult}
                   stages={repair.stages}
                   status={repair.status}

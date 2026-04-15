@@ -24,6 +24,36 @@ import {
   parseSseBlock,
 } from "./utils";
 
+function defaultEntrypointForLanguage(language: CodeLanguage) {
+  switch (language) {
+    case "javascript":
+      return "index.js";
+    case "typescript":
+      return "index.ts";
+    case "java":
+      return "Main.java";
+    case "go":
+      return "main.go";
+    case "c":
+      return "main.c";
+    case "cpp":
+      return "main.cpp";
+    case "python":
+    default:
+      return "main.py";
+  }
+}
+
+const knownDefaultEntrypoints = new Set<string>([
+  "main.py",
+  "index.js",
+  "index.ts",
+  "Main.java",
+  "main.go",
+  "main.c",
+  "main.cpp",
+]);
+
 interface UseRepairSessionOptions {
   apiBaseUrl: string;
   dict: AppCopy;
@@ -44,7 +74,7 @@ export function useRepairSession({
   const [agentSourceType, setAgentSourceType] = useState<AgentSourceType>("single_file");
   const [language, setLanguage] = useState<CodeLanguage>("python");
   const [code, setCode] = useState(codeTemplates.python);
-  const [entrypointPath, setEntrypointPath] = useState("main.py");
+  const [entrypointPath, setEntrypointPath] = useState(defaultEntrypointForLanguage("python"));
   const [projectSubdir, setProjectSubdir] = useState("");
   const [githubRepoUrl, setGithubRepoUrl] = useState("");
   const [githubRef, setGithubRef] = useState("");
@@ -63,7 +93,7 @@ export function useRepairSession({
 
   const streamAbortRef = useRef<AbortController | null>(null);
   const activeLanguage = languageOptions.find((item) => item.value === language) ?? languageOptions[0];
-  const pythonSupported = agentSourceType === "single_file" ? activeLanguage.supported : true;
+  const languageSupported = activeLanguage.supported;
 
   useEffect(() => {
     if (agentSourceType !== "single_file") {
@@ -71,6 +101,16 @@ export function useRepairSession({
     }
     setCode(codeTemplates[language]);
   }, [agentSourceType, language]);
+
+  useEffect(() => {
+    setEntrypointPath((current) => {
+      const trimmed = current.trim();
+      if (!trimmed || knownDefaultEntrypoints.has(trimmed)) {
+        return defaultEntrypointForLanguage(language);
+      }
+      return current;
+    });
+  }, [language]);
 
   useEffect(() => {
     return () => {
@@ -120,7 +160,7 @@ export function useRepairSession({
     if (agentSourceType === "single_file") {
       return {
         code,
-        filename: normalizedEntrypoint || `snippet.${activeLanguage.extension}`,
+        filename: normalizedEntrypoint || defaultEntrypointForLanguage(language),
         language,
         model,
       };
@@ -131,8 +171,8 @@ export function useRepairSession({
         throw new Error(dict.zipRequired);
       }
       return {
-        filename: normalizedEntrypoint || "main.py",
-        language: "python",
+        filename: normalizedEntrypoint || defaultEntrypointForLanguage(language),
+        language,
         model,
         project_zip_base64: zipFileBase64,
         ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
@@ -145,8 +185,8 @@ export function useRepairSession({
       throw new Error(dict.githubRepoRequired);
     }
     return {
-      filename: normalizedEntrypoint || "main.py",
-      language: "python",
+      filename: normalizedEntrypoint || defaultEntrypointForLanguage(language),
+      language,
       model,
       github_repo_url: normalizedRepoUrl,
       ...(normalizedRef ? { github_ref: normalizedRef } : {}),
@@ -391,7 +431,7 @@ export function useRepairSession({
   }
 
   async function handleSend() {
-    if (!pythonSupported) {
+    if (!languageSupported) {
       setErrorMessage(dict.unsupported);
       setStatus("error");
       return;
@@ -494,6 +534,7 @@ export function useRepairSession({
 
   function startNewAgentSession() {
     setCode(codeTemplates[language]);
+    setEntrypointPath(defaultEntrypointForLanguage(language));
     resetRepairState();
   }
 
@@ -509,7 +550,7 @@ export function useRepairSession({
 
   function loadHistorySnapshot(snapshot: AgentHistorySnapshot) {
     setAgentSourceType(snapshot.source_type ?? "single_file");
-    setEntrypointPath(snapshot.filename ?? "main.py");
+    setEntrypointPath(snapshot.filename ?? defaultEntrypointForLanguage(snapshot.language ?? "python"));
     setProjectSubdir(snapshot.project_subdir ?? "");
     setGithubRepoUrl(snapshot.github_repo_url ?? "");
     setGithubRef(snapshot.github_ref ?? "");
@@ -519,7 +560,7 @@ export function useRepairSession({
     setCode(
       snapshot.source_type === "single_file"
         ? snapshot.code ?? codeTemplates[snapshot.language ?? "python"]
-        : codeTemplates.python,
+        : codeTemplates[snapshot.language ?? "python"],
     );
     setRunResult(snapshot.run_result ?? null);
     setStages(normalizeStageMap(snapshot.stages));
@@ -568,7 +609,7 @@ export function useRepairSession({
     errorMessage,
     diffDecisionMessage,
     diffApplied,
-    pythonSupported,
+    languageSupported,
     setAgentSourceType,
     setLanguage,
     setCode,
