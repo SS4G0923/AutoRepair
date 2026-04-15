@@ -48,6 +48,7 @@ from backend.history.store import (
     soft_delete_history_for_user,
 )
 from backend.repair.pipeline import RepairRequest, run_repair_pipeline
+from backend.repair.workspace import list_project_entrypoint_options
 
 try:
     from dotenv import load_dotenv
@@ -858,6 +859,7 @@ def repair_stream() -> Response:
         "code": repair_request.code or "",
         "filename": repair_request.filename or "",
         "language": repair_request.language,
+        "input_text": repair_request.input_text or "",
         "model": repair_request.model,
         "source_type": repair_request.source_type,
         "github_repo_url": repair_request.github_repo_url,
@@ -884,6 +886,7 @@ def repair_stream() -> Response:
             captured["run_result"] = {
                 "stdout": outgoing.get("stdout", ""),
                 "stderr": outgoing.get("stderr", ""),
+                "input_text": outgoing.get("input_text", ""),
                 "entrypoint": outgoing.get("entrypoint"),
                 "source_type": outgoing.get("source_type"),
                 "file_count": outgoing.get("file_count"),
@@ -1012,6 +1015,54 @@ def repair_stream() -> Response:
     response.headers["Connection"] = "keep-alive"
     response.headers["X-Accel-Buffering"] = "no"
     return response
+
+
+@app.route("/api/repair/project-files", methods=["POST", "OPTIONS"])
+@_require_login
+def repair_project_files() -> Response:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+
+    project_zip_base64 = payload.get("project_zip_base64")
+    github_repo_url = payload.get("github_repo_url")
+    github_ref = payload.get("github_ref")
+    project_subdir = payload.get("project_subdir")
+
+    if project_zip_base64 is not None and (
+        not isinstance(project_zip_base64, str) or not project_zip_base64.strip()
+    ):
+        return jsonify({"error": "`project_zip_base64` must be a non-empty base64 string when provided."}), 400
+    if github_repo_url is not None and (
+        not isinstance(github_repo_url, str) or not github_repo_url.strip()
+    ):
+        return jsonify({"error": "`github_repo_url` must be a non-empty string when provided."}), 400
+    if github_ref is not None and not isinstance(github_ref, str):
+        return jsonify({"error": "`github_ref` must be a string when provided."}), 400
+    if project_subdir is not None and (
+        not isinstance(project_subdir, str) or not project_subdir.strip()
+    ):
+        return jsonify({"error": "`project_subdir` must be a non-empty string when provided."}), 400
+
+    source_count = sum(
+        1
+        for present in (bool(project_zip_base64), bool(github_repo_url))
+        if present
+    )
+    if source_count != 1:
+        return jsonify({"error": "Exactly one of `project_zip_base64` or `github_repo_url` must be provided."}), 400
+
+    try:
+        result = list_project_entrypoint_options(
+            project_zip_base64=project_zip_base64.strip() if isinstance(project_zip_base64, str) else None,
+            github_repo_url=github_repo_url.strip() if isinstance(github_repo_url, str) else None,
+            github_ref=github_ref.strip() if isinstance(github_ref, str) and github_ref.strip() else None,
+            project_subdir=project_subdir.strip() if isinstance(project_subdir, str) else None,
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(result)
 
 
 @app.route("/api/chat/stream", methods=["POST", "OPTIONS"])

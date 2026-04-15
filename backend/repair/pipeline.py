@@ -27,6 +27,7 @@ from backend.repair.sandbox import run_project_safely
 
 DEFAULT_MODEL = "qwen3.5-flash"
 MAX_CODE_CHARS = 100_000
+MAX_INPUT_CHARS = 20_000
 MAX_TIMEOUT_SEC = 30
 
 INSPECTOR_JSON_SYSTEM_PROMPT_TEMPLATE = """You are an expert bug inspection agent.
@@ -193,6 +194,7 @@ class RepairRequest:
     code: str | None = None
     filename: str | None = "main.py"
     language: str = "python"
+    input_text: str | None = None
     timeout_sec: int = 5
     model: str = DEFAULT_MODEL
     project_files: tuple[ProjectFileInput, ...] = ()
@@ -242,6 +244,15 @@ class RepairRequest:
             raise ValueError("`timeout_sec` must be an integer.")
         if timeout_sec < 1 or timeout_sec > MAX_TIMEOUT_SEC:
             raise ValueError(f"`timeout_sec` must be between 1 and {MAX_TIMEOUT_SEC}.")
+
+        input_text = payload.get("input_text")
+        normalized_input_text: str | None = None
+        if input_text is not None:
+            if not isinstance(input_text, str):
+                raise ValueError("`input_text` must be a string when provided.")
+            if len(input_text) > MAX_INPUT_CHARS:
+                raise ValueError(f"`input_text` must be at most {MAX_INPUT_CHARS} characters.")
+            normalized_input_text = input_text
 
         model = payload.get("model", DEFAULT_MODEL)
         if not isinstance(model, str) or not model.strip():
@@ -309,6 +320,7 @@ class RepairRequest:
             code=normalized_code,
             filename=filename,
             language=language,
+            input_text=normalized_input_text,
             timeout_sec=timeout_sec,
             model=model.strip(),
             project_files=tuple(project_files),
@@ -1085,12 +1097,14 @@ def run_repair_pipeline(
             workspace.root_dir,
             filename=workspace.entrypoint,
             language=request.language,
+            input_text=request.input_text,
             timeout_sec=request.timeout_sec,
         )
         emit(
             "run_result",
             {
                 "execution": execution.to_dict(),
+                "input_text": request.input_text or "",
                 "stdout": execution.stdout,
                 "stderr": execution.stderr,
                 "entrypoint": workspace.entrypoint,
@@ -1111,7 +1125,11 @@ def run_repair_pipeline(
             )
             return
 
-        runtime_report = build_project_runtime_inspection_report(workspace, execution)
+        runtime_report = build_project_runtime_inspection_report(
+            workspace,
+            request.input_text,
+            execution,
+        )
         stage_tools = build_repair_tools(
             RepairToolContext(
                 language=request.language,
@@ -1494,6 +1512,7 @@ def run_repair_pipeline(
                         patched_root,
                         filename=workspace.entrypoint,
                         language=request.language,
+                        input_text=request.input_text,
                         timeout_sec=request.timeout_sec,
                     )
                 if request.language == "python":
@@ -1539,6 +1558,7 @@ def run_repair_pipeline(
                             verify_root,
                             filename=workspace.entrypoint,
                             language=request.language,
+                            input_text=request.input_text,
                             timeout_sec=request.timeout_sec,
                         )
 

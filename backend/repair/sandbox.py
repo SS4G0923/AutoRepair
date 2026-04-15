@@ -157,6 +157,18 @@ def _truncate_text(text: str, max_chars: int) -> tuple[str, bool]:
     return text[:max_chars], True
 
 
+def _summarize_input_text(input_text: str | None, *, max_chars: int = 2_000) -> dict[str, Any]:
+    normalized = input_text or ""
+    preview, truncated = _truncate_text(normalized, max_chars)
+    return {
+        "provided": bool(normalized),
+        "char_count": len(normalized),
+        "line_count": len(normalized.splitlines()) if normalized else 0,
+        "preview": preview,
+        "truncated": truncated,
+    }
+
+
 def _limit_resources(memory_limit_mb: int, cpu_time_sec: int, file_limit_bytes: int) -> None:
     import resource
 
@@ -181,6 +193,7 @@ def _run_command_safely(
     work_dir: Path,
     filename: str,
     command: list[str],
+    input_text: str | None,
     timeout_sec: int,
     memory_limit_mb: int,
     max_output_chars: int,
@@ -203,7 +216,7 @@ def _run_command_safely(
         process = subprocess.Popen(
             command,
             cwd=work_dir,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             stdout=stdout_file,
             stderr=stderr_file,
             env=env,
@@ -215,7 +228,8 @@ def _run_command_safely(
             ),
         )
         try:
-            returncode = process.wait(timeout=timeout_sec + 1)
+            process.communicate(input=input_text, timeout=timeout_sec + 1)
+            returncode = process.returncode
         except subprocess.TimeoutExpired:
             timed_out = True
             try:
@@ -295,6 +309,7 @@ def _compile_and_run_java_project(
     *,
     work_dir: Path,
     filename: str,
+    input_text: str | None,
     timeout_sec: int,
     memory_limit_mb: int,
     max_output_chars: int,
@@ -310,6 +325,7 @@ def _compile_and_run_java_project(
         work_dir=work_dir,
         filename=filename,
         command=[javac, *java_sources],
+        input_text=None,
         timeout_sec=timeout_sec,
         memory_limit_mb=compile_memory_limit_mb,
         max_output_chars=max_output_chars,
@@ -322,6 +338,7 @@ def _compile_and_run_java_project(
         work_dir=work_dir,
         filename=filename,
         command=[java, "-cp", str(work_dir), main_class],
+        input_text=input_text,
         timeout_sec=timeout_sec,
         memory_limit_mb=memory_limit_mb,
         max_output_chars=max_output_chars,
@@ -334,6 +351,7 @@ def _compile_and_run_c_family_project(
     filename: str,
     compiler_name: str,
     source_suffixes: tuple[str, ...],
+    input_text: str | None,
     timeout_sec: int,
     memory_limit_mb: int,
     max_output_chars: int,
@@ -341,18 +359,18 @@ def _compile_and_run_c_family_project(
     compile_memory_limit_mb = max(memory_limit_mb, 1024)
     compile_file_limit_bytes = 100 * 1024 * 1024
     compiler = _require_command(compiler_name)
-    sources = sorted(
-        str(path.relative_to(work_dir))
-        for path in work_dir.rglob("*")
-        if path.suffix.lower() in source_suffixes
-    )
-    if not sources:
-        raise RuntimeError("No source files were found to compile.")
+    entrypoint_path = work_dir / filename
+    if not entrypoint_path.is_file():
+        raise RuntimeError(f"Selected source file was not found: {filename}")
+    if entrypoint_path.suffix.lower() not in source_suffixes:
+        raise RuntimeError(f"Selected source file does not match the expected language: {filename}")
+    sources = [filename]
     binary_name = "__autorepair_binary__"
     compile_result = _run_command_safely(
         work_dir=work_dir,
         filename=filename,
         command=[compiler, "-O0", "-g", *sources, "-o", binary_name],
+        input_text=None,
         timeout_sec=timeout_sec,
         memory_limit_mb=compile_memory_limit_mb,
         max_output_chars=max_output_chars,
@@ -364,6 +382,7 @@ def _compile_and_run_c_family_project(
         work_dir=work_dir,
         filename=filename,
         command=[str(work_dir / binary_name)],
+        input_text=input_text,
         timeout_sec=timeout_sec,
         memory_limit_mb=memory_limit_mb,
         max_output_chars=max_output_chars,
@@ -388,6 +407,7 @@ def _run_python_entrypoint_safely(
     *,
     work_dir: Path,
     filename: str,
+    input_text: str | None,
     timeout_sec: int,
     memory_limit_mb: int,
     max_output_chars: int,
@@ -397,6 +417,7 @@ def _run_python_entrypoint_safely(
         work_dir=work_dir,
         filename=filename,
         command=command,
+        input_text=input_text,
         timeout_sec=timeout_sec,
         memory_limit_mb=memory_limit_mb,
         max_output_chars=max_output_chars,
@@ -408,6 +429,7 @@ def _run_python_entrypoint_via_launcher(
     *,
     work_dir: Path,
     filename: str,
+    input_text: str | None,
     timeout_sec: int,
     memory_limit_mb: int,
     max_output_chars: int,
@@ -424,6 +446,7 @@ def _run_python_entrypoint_via_launcher(
     result = _run_python_entrypoint_safely(
         work_dir=work_dir,
         filename=launcher_name,
+        input_text=input_text,
         timeout_sec=timeout_sec,
         memory_limit_mb=memory_limit_mb,
         max_output_chars=max_output_chars,
@@ -445,6 +468,7 @@ def run_python_code_safely(
     code: str,
     *,
     filename: str = "main.py",
+    input_text: str | None = None,
     timeout_sec: int = 5,
     memory_limit_mb: int = 256,
     max_output_chars: int = 20_000,
@@ -456,6 +480,7 @@ def run_python_code_safely(
         return _run_python_entrypoint_safely(
             work_dir=work_dir,
             filename=filename,
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=memory_limit_mb,
             max_output_chars=max_output_chars,
@@ -466,6 +491,7 @@ def run_python_project_safely(
     project_root: str | Path,
     *,
     filename: str,
+    input_text: str | None = None,
     timeout_sec: int = 5,
     memory_limit_mb: int = 256,
     max_output_chars: int = 20_000,
@@ -474,6 +500,7 @@ def run_python_project_safely(
     return _run_python_entrypoint_via_launcher(
         work_dir=work_dir,
         filename=filename,
+        input_text=input_text,
         timeout_sec=timeout_sec,
         memory_limit_mb=memory_limit_mb,
         max_output_chars=max_output_chars,
@@ -485,6 +512,7 @@ def run_project_safely(
     *,
     filename: str,
     language: str,
+    input_text: str | None = None,
     timeout_sec: int = 5,
     memory_limit_mb: int = 256,
     max_output_chars: int = 20_000,
@@ -495,6 +523,7 @@ def run_project_safely(
         return run_python_project_safely(
             work_dir,
             filename=filename,
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=memory_limit_mb,
             max_output_chars=max_output_chars,
@@ -505,6 +534,7 @@ def run_project_safely(
             work_dir=work_dir,
             filename=filename,
             command=command,
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=memory_limit_mb,
             max_output_chars=max_output_chars,
@@ -516,6 +546,7 @@ def run_project_safely(
             work_dir=work_dir,
             filename=filename,
             command=command,
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=memory_limit_mb,
             max_output_chars=max_output_chars,
@@ -525,6 +556,7 @@ def run_project_safely(
         return _compile_and_run_java_project(
             work_dir=work_dir,
             filename=filename,
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=memory_limit_mb,
             max_output_chars=max_output_chars,
@@ -535,6 +567,7 @@ def run_project_safely(
             work_dir=work_dir,
             filename=filename,
             command=command,
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=max(memory_limit_mb, 1024),
             max_output_chars=max_output_chars,
@@ -547,6 +580,7 @@ def run_project_safely(
             filename=filename,
             compiler_name="gcc",
             source_suffixes=(".c",),
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=memory_limit_mb,
             max_output_chars=max_output_chars,
@@ -557,6 +591,7 @@ def run_project_safely(
             filename=filename,
             compiler_name="g++",
             source_suffixes=(".cpp", ".cc", ".cxx", ".c++"),
+            input_text=input_text,
             timeout_sec=timeout_sec,
             memory_limit_mb=memory_limit_mb,
             max_output_chars=max_output_chars,
@@ -568,6 +603,7 @@ def build_runtime_inspection_report(
     *,
     code: str,
     filename: str,
+    input_text: str | None,
     execution: SandboxedExecutionResult,
 ) -> dict[str, Any]:
     traceback_frames = _extract_traceback_frames(execution.stderr, filename)
@@ -584,6 +620,7 @@ def build_runtime_inspection_report(
             "timed_out": execution.timed_out,
             "primary_frame": primary_frame,
         },
+        "input": _summarize_input_text(input_text),
         "traceback_frames": traceback_frames,
         "source": {
             "code": code,
@@ -597,6 +634,7 @@ def build_project_runtime_inspection_report(
     file_map: dict[str, str],
     language: str,
     entrypoint: str,
+    input_text: str | None,
     project_root: Path,
     dependency_graph: dict[str, list[str]],
     reverse_dependency_graph: dict[str, list[str]],
@@ -624,6 +662,7 @@ def build_project_runtime_inspection_report(
             "timed_out": execution.timed_out,
             "primary_frame": primary_frame,
         },
+        "input": _summarize_input_text(input_text),
         "traceback_frames": traceback_frames,
         "source": {
             "entrypoint_code": file_map.get(entrypoint, ""),

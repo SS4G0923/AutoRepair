@@ -5,6 +5,7 @@ import type {
   AgentSourceType,
   CodeLanguage,
   ModelOptionValue,
+  ProjectEntrypointOption,
   RunResult,
   SessionStatus,
   StageName,
@@ -24,10 +25,13 @@ interface AgentWorkspaceProps {
   finalMessage: string;
   githubRef: string;
   githubRepoUrl: string;
+  inputText: string;
   language: CodeLanguage;
   locale: UiLocale;
   model: ModelOptionValue;
   projectSubdir: string;
+  projectEntrypointOptions: ProjectEntrypointOption[];
+  projectFilesLoading: boolean;
   languageSupported: boolean;
   runResult: RunResult | null;
   stages: Record<StageName, StageState>;
@@ -41,6 +45,7 @@ interface AgentWorkspaceProps {
   onEntrypointChange: (value: string) => void;
   onGithubRefChange: (value: string) => void;
   onGithubRepoUrlChange: (value: string) => void;
+  onInputTextChange: (value: string) => void;
   onLanguageChange: (value: CodeLanguage) => void;
   onModelChange: (value: ModelOptionValue) => void;
   onProjectSubdirChange: (value: string) => void;
@@ -64,10 +69,13 @@ export function AgentWorkspace({
   finalMessage,
   githubRef,
   githubRepoUrl,
+  inputText,
   language,
   locale,
   model,
   projectSubdir,
+  projectEntrypointOptions,
+  projectFilesLoading,
   languageSupported,
   runResult,
   stages,
@@ -81,6 +89,7 @@ export function AgentWorkspace({
   onEntrypointChange,
   onGithubRefChange,
   onGithubRepoUrlChange,
+  onInputTextChange,
   onLanguageChange,
   onModelChange,
   onProjectSubdirChange,
@@ -121,17 +130,23 @@ export function AgentWorkspace({
                 </div>
 
                 <div className="flex min-w-[180px] flex-col gap-2">
-                  <select
-                    value={language}
-                    onChange={(event) => onLanguageChange(event.target.value as CodeLanguage)}
-                    className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-                  >
-                    {languageOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  {agentSourceType === "single_file" ? (
+                    <select
+                      value={language}
+                      onChange={(event) => onLanguageChange(event.target.value as CodeLanguage)}
+                      className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                    >
+                      {languageOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                      {copy.detectedLanguage}: {languageOptions.find((option) => option.value === language)?.label ?? language}
+                    </div>
+                  )}
                   <select
                     value={model}
                     onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
@@ -153,12 +168,24 @@ export function AgentWorkspace({
                       <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
                         {copy.entrypoint}
                       </div>
-                      <input
+                      <select
                         value={entrypointPath}
                         onChange={(event) => onEntrypointChange(event.target.value)}
-                        placeholder="app/main.py"
                         className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
-                      />
+                        disabled={projectFilesLoading || projectEntrypointOptions.length === 0}
+                      >
+                        {projectFilesLoading ? (
+                          <option value="">{copy.projectFilesLoading}</option>
+                        ) : projectEntrypointOptions.length > 0 ? (
+                          projectEntrypointOptions.map((option) => (
+                            <option key={option.path} value={option.path}>
+                              {option.path}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">{copy.projectFilesEmpty}</option>
+                        )}
+                      </select>
                     </label>
                     <label className="block">
                       <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
@@ -228,12 +255,24 @@ export function AgentWorkspace({
                     <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
                       {copy.entrypoint}
                     </div>
-                    <input
+                    <select
                       value={entrypointPath}
                       onChange={(event) => onEntrypointChange(event.target.value)}
-                      placeholder="app/main.py"
                       className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
-                    />
+                      disabled={projectFilesLoading || projectEntrypointOptions.length === 0}
+                    >
+                      {projectFilesLoading ? (
+                        <option value="">{copy.projectFilesLoading}</option>
+                      ) : projectEntrypointOptions.length > 0 ? (
+                        projectEntrypointOptions.map((option) => (
+                          <option key={option.path} value={option.path}>
+                            {option.path}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">{copy.projectFilesEmpty}</option>
+                      )}
+                    </select>
                   </label>
                   <label className="block">
                     <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
@@ -248,6 +287,19 @@ export function AgentWorkspace({
                   </label>
                 </div>
               ) : null}
+
+              <label className="block">
+                <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                  {copy.programInput}
+                </div>
+                <textarea
+                  value={inputText}
+                  onChange={(event) => onInputTextChange(event.target.value)}
+                  placeholder={copy.programInputHint}
+                  rows={agentSourceType === "single_file" ? 4 : 3}
+                  className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                />
+              </label>
             </div>
 
             {!languageSupported ? (
@@ -267,7 +319,7 @@ export function AgentWorkspace({
                         {copy.entrypoint}
                       </div>
                       <div className="mt-2 font-mono text-sm text-slate-800 dark:text-white">
-                        {entrypointPath.trim() || "main.py"}
+                        {entrypointPath.trim() || (projectFilesLoading ? copy.projectFilesLoading : copy.projectFilesEmpty)}
                       </div>
                     </div>
                     <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70">
@@ -350,7 +402,15 @@ export function AgentWorkspace({
               </div>
 
               {runResult ? (
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/80">
+                      {copy.stdin}
+                    </div>
+                    <pre className="min-h-[120px] whitespace-pre-wrap break-words rounded-3xl bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:bg-slate-950/95 dark:text-white">
+                      {runResult.input_text || "∅"}
+                    </pre>
+                  </div>
                   <div>
                     <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/80">
                       {copy.stdout}

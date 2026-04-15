@@ -55,6 +55,7 @@ export interface EventEntry {
 }
 
 export interface RunResult {
+  input_text?: string;
   stdout: string;
   stderr: string;
   entrypoint?: string;
@@ -65,6 +66,11 @@ export interface RunResult {
     duration_sec: number;
     timed_out: boolean;
   };
+}
+
+export interface ProjectEntrypointOption {
+  path: string;
+  language: CodeLanguage;
 }
 
 export interface AuthenticatedUser {
@@ -102,6 +108,7 @@ export interface AgentHistorySnapshot {
   code: string;
   filename: string;
   language: CodeLanguage;
+  input_text?: string;
   model: string;
   source_type?: AgentSourceType;
   github_repo_url?: string;

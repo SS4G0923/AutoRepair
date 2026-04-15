@@ -600,10 +600,13 @@ function App() {
                   finalMessage={repair.finalMessage}
                   githubRef={repair.githubRef}
                   githubRepoUrl={repair.githubRepoUrl}
+                  inputText={repair.inputText}
                   language={repair.language}
                   locale={locale}
                   model={model}
                   projectSubdir={repair.projectSubdir}
+                  projectEntrypointOptions={repair.projectEntrypointOptions}
+                  projectFilesLoading={repair.projectFilesLoading}
                   languageSupported={repair.languageSupported}
                   runResult={repair.runResult}
                   stages={repair.stages}
@@ -617,6 +620,7 @@ function App() {
                   onEntrypointChange={repair.setEntrypointPath}
                   onGithubRefChange={repair.setGithubRef}
                   onGithubRepoUrlChange={repair.setGithubRepoUrl}
+                  onInputTextChange={repair.setInputText}
                   onLanguageChange={repair.setLanguage}
                   onModelChange={setModel}
                   onProjectSubdirChange={repair.setProjectSubdir}
