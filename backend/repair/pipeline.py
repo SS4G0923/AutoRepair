@@ -10,6 +10,7 @@ from typing import Any, Callable
 from backend.inspector.inspector_prompt import build_planner_prompt
 from backend.llm import call_llm_for_json
 from backend.llm.agent_tools import RepairToolContext, build_repair_tools
+from backend.llm.store import resolve_model_selection
 from backend.llm.telemetry import LLMCallContext
 from backend.repair.languages import (
     default_entrypoint_for_language,
@@ -25,7 +26,6 @@ from backend.repair.workspace import (
 )
 from backend.repair.sandbox import run_project_safely
 
-DEFAULT_MODEL = "qwen3.5-flash"
 MAX_CODE_CHARS = 100_000
 MAX_INPUT_CHARS = 20_000
 MAX_TIMEOUT_SEC = 30
@@ -196,7 +196,7 @@ class RepairRequest:
     language: str = "python"
     input_text: str | None = None
     timeout_sec: int = 5
-    model: str = DEFAULT_MODEL
+    model: str = ""
     project_files: tuple[ProjectFileInput, ...] = ()
     project_zip_base64: str | None = None
     github_repo_url: str | None = None
@@ -254,9 +254,13 @@ class RepairRequest:
                 raise ValueError(f"`input_text` must be at most {MAX_INPUT_CHARS} characters.")
             normalized_input_text = input_text
 
-        model = payload.get("model", DEFAULT_MODEL)
-        if not isinstance(model, str) or not model.strip():
-            raise ValueError("`model` must be a non-empty string.")
+        raw_model = payload.get("model")
+        if raw_model is not None and (not isinstance(raw_model, str) or not raw_model.strip()):
+            raise ValueError("`model` must be a non-empty string when provided.")
+        resolved_model = resolve_model_selection(
+            raw_model.strip() if isinstance(raw_model, str) and raw_model.strip() else None,
+            purpose="repair",
+        )
 
         raw_project_files = payload.get("project_files")
         project_files: list[ProjectFileInput] = []
@@ -322,7 +326,7 @@ class RepairRequest:
             language=language,
             input_text=normalized_input_text,
             timeout_sec=timeout_sec,
-            model=model.strip(),
+            model=resolved_model.model_key,
             project_files=tuple(project_files),
             project_zip_base64=project_zip_base64.strip() if isinstance(project_zip_base64, str) else None,
             github_repo_url=github_repo_url.strip() if isinstance(github_repo_url, str) else None,

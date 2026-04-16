@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import json
 
+from backend.llm.store import (
+    get_runtime_model_config,
+    is_model_thinking_enabled,
+    load_model_api_key,
+)
 from backend.llm.telemetry import (
     LLMCallContext,
     append_tool_event,
@@ -22,7 +27,27 @@ def call_llm_for_json(
     tool_event_handler=None,
     audit_context: LLMCallContext | None = None,
 ):
-    if "gemini" in model.lower():
+    runtime_model = None
+    try:
+        runtime_model = get_runtime_model_config(model, include_disabled=True)
+    except Exception:
+        runtime_model = None
+
+    provider_code = runtime_model.provider_code if runtime_model is not None else infer_provider(model)
+    provider_name = runtime_model.provider_name if runtime_model is not None else provider_code
+    provider_model_name = runtime_model.api_model_name if runtime_model is not None else model
+    thinking_enabled = is_model_thinking_enabled(runtime_model) if runtime_model is not None else False
+    is_ollama_like = bool(
+        runtime_model is not None
+        and (
+            "ollama" in runtime_model.provider_name.strip().lower()
+            or "ollama" in runtime_model.vendor_name.strip().lower()
+            or (runtime_model.api_base_url or "").strip().startswith("http://127.0.0.1:11434")
+            or "11434" in (runtime_model.api_base_url or "")
+        )
+    )
+
+    if provider_code == "gemini":
         from backend.llm.call_gemini import call_llm_for_json as provider_call
     else:
         from backend.llm.call_gpt import call_llm_for_json as provider_call
@@ -35,7 +60,7 @@ def call_llm_for_json(
         log_request_id, log_started_monotonic = start_llm_request_log(
             context=audit_context,
             model=model,
-            provider=infer_provider(model),
+            provider=provider_name,
             system_prompt=system_prompt,
             prompt=prompt,
             is_streaming=stream,
@@ -62,14 +87,27 @@ def call_llm_for_json(
 
     kwargs = {
         "prompt": prompt,
-        "model": model,
+        "model": provider_model_name,
         "isJson": isJson,
         "stream": stream,
         "stream_handler": stream_handler,
         "tools": tools,
         "tool_event_handler": wrapped_tool_event_handler,
         "metadata_handler": on_provider_metadata,
+        "thinking_enabled": thinking_enabled,
     }
+    if runtime_model is not None:
+        api_key = load_model_api_key(runtime_model)
+        if runtime_model.api_key_env_var and not api_key:
+            raise RuntimeError(
+                f"Model `{model}` requires environment variable `{runtime_model.api_key_env_var}`."
+            )
+        if api_key is not None:
+            kwargs["api_key"] = api_key
+        if provider_code != "gemini" and runtime_model.api_base_url:
+            kwargs["base_url"] = runtime_model.api_base_url
+        if provider_code != "gemini" and is_ollama_like:
+            kwargs["extra_body"] = {"think": thinking_enabled}
     if system_prompt is not None:
         kwargs["system_prompt"] = system_prompt
     try:

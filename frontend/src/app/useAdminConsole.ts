@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type {
   AdminDashboardData,
   AdminLoginEventList,
+  AdminModelConfigItem,
+  AdminModelConfigPayload,
   AdminLlmRequestDetail,
   AdminLlmRequestList,
   AdminModelUsageReport,
@@ -14,7 +16,8 @@ import type {
 interface UseAdminConsoleOptions {
   apiBaseUrl: string;
   enabled: boolean;
-  refreshSession?: () => Promise<void>;
+  refreshSession?: () => Promise<unknown>;
+  refreshModels?: () => Promise<unknown>;
 }
 
 export interface AdminRequestFilters {
@@ -49,7 +52,7 @@ async function fetchAdminJson<T>(apiBaseUrl: string, path: string, signal?: Abor
 async function postAdminJson<T>(
   apiBaseUrl: string,
   path: string,
-  body?: Record<string, unknown>,
+  body?: unknown,
 ): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
@@ -66,16 +69,30 @@ async function postAdminJson<T>(
   return (await response.json()) as T;
 }
 
+async function deleteAdminJson<T>(apiBaseUrl: string, path: string): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const payload = await response.text();
+    throw new Error(payload || `HTTP ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 export function useAdminConsole({
   apiBaseUrl,
   enabled,
   refreshSession,
+  refreshModels,
 }: UseAdminConsoleOptions) {
   const [adminPage, setAdminPage] = useState<AdminPage>("dashboard");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState("");
   const [adminUserRoleUpdatingId, setAdminUserRoleUpdatingId] = useState<number | null>(null);
   const [adminPaymentActingOrderId, setAdminPaymentActingOrderId] = useState<number | null>(null);
+  const [adminModelMutatingId, setAdminModelMutatingId] = useState<number | "create" | null>(null);
   const [dashboardData, setDashboardData] = useState<AdminDashboardData | null>(null);
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [requests, setRequests] = useState<AdminLlmRequestList | null>(null);
@@ -83,6 +100,7 @@ export function useAdminConsole({
   const [requestDetailLoading, setRequestDetailLoading] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
   const [modelUsage, setModelUsage] = useState<AdminModelUsageReport | null>(null);
+  const [modelConfigs, setModelConfigs] = useState<AdminModelConfigItem[]>([]);
   const [loginEvents, setLoginEvents] = useState<AdminLoginEventList | null>(null);
   const [paymentOrders, setPaymentOrders] = useState<AdminPaymentOrderList | null>(null);
   const [requestFilters, setRequestFilters] = useState<AdminRequestFilters>({
@@ -111,6 +129,7 @@ export function useAdminConsole({
       setUsers([]);
       setRequests(null);
       setModelUsage(null);
+      setModelConfigs([]);
       setLoginEvents(null);
       setPaymentOrders(null);
       setRequestDetail(null);
@@ -172,22 +191,26 @@ export function useAdminConsole({
           if (data.items.length === 0) {
             return null;
           }
-          if (current == null) {
-            return data.items[0].id;
-          }
-          return data.items.some((item) => item.id === current) ? current : data.items[0].id;
+          return data.items.some((item) => item.id === current) ? current : null;
         });
         return;
       }
 
       if (adminPage === "models") {
-        setModelUsage(
-          await fetchAdminJson<AdminModelUsageReport>(
+        const [usageData, configData] = await Promise.all([
+          fetchAdminJson<AdminModelUsageReport>(
             apiBaseUrl,
             `/api/admin/model-usage?days=${modelUsageDays}`,
             controller.signal,
           ),
-        );
+          fetchAdminJson<{ items: AdminModelConfigItem[] }>(
+            apiBaseUrl,
+            "/api/admin/model-configs",
+            controller.signal,
+          ),
+        ]);
+        setModelUsage(usageData);
+        setModelConfigs(configData.items ?? []);
         return;
       }
 
@@ -297,6 +320,7 @@ export function useAdminConsole({
     setRequestDetail(null);
     setSelectedRequestId(null);
     setModelUsage(null);
+    setModelConfigs([]);
     setLoginEvents(null);
     setPaymentOrders(null);
     setRequestFilters({
@@ -356,12 +380,57 @@ export function useAdminConsole({
     }
   }
 
+  async function mutateModelCatalog(task: () => Promise<void>, actingId: number | "create") {
+    setAdminModelMutatingId(actingId);
+    setAdminError("");
+    try {
+      await task();
+      if (refreshModels) {
+        await refreshModels();
+      }
+      refreshAdminData();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      setAdminModelMutatingId(null);
+    }
+  }
+
+  async function createAdminModelConfig(payload: AdminModelConfigPayload) {
+    await mutateModelCatalog(
+      async () => {
+        await postAdminJson(apiBaseUrl, "/api/admin/model-configs", payload);
+      },
+      "create",
+    );
+  }
+
+  async function updateAdminModelConfig(modelConfigId: number, payload: AdminModelConfigPayload) {
+    await mutateModelCatalog(
+      async () => {
+        await postAdminJson(apiBaseUrl, `/api/admin/model-configs/${modelConfigId}`, payload);
+      },
+      modelConfigId,
+    );
+  }
+
+  async function deleteAdminModelConfig(modelConfigId: number) {
+    await mutateModelCatalog(
+      async () => {
+        await deleteAdminJson(apiBaseUrl, `/api/admin/model-configs/${modelConfigId}`);
+      },
+      modelConfigId,
+    );
+  }
+
   return {
     adminPage,
     adminLoading,
     adminError,
     adminUserRoleUpdatingId,
     adminPaymentActingOrderId,
+    adminModelMutatingId,
     dashboardData,
     users,
     requests,
@@ -369,6 +438,7 @@ export function useAdminConsole({
     requestDetailLoading,
     selectedRequestId,
     modelUsage,
+    modelConfigs,
     loginEvents,
     paymentOrders,
     requestFilters,
@@ -386,5 +456,8 @@ export function useAdminConsole({
     updateUserRole,
     approvePaymentOrder: (orderId: number) => actOnPaymentOrder(orderId, true),
     rejectPaymentOrder: (orderId: number) => actOnPaymentOrder(orderId, false),
+    createAdminModelConfig,
+    updateAdminModelConfig,
+    deleteAdminModelConfig,
   };
 }

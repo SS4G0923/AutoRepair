@@ -12,7 +12,7 @@ import { AppHeader } from "./components/app/AppHeader";
 import { AppSidebar } from "./components/app/AppSidebar";
 import { ChatWorkspace } from "./components/app/ChatWorkspace";
 import { BillingWorkspace } from "./components/billing/BillingWorkspace";
-import { copy, modelOptions } from "./i18n";
+import { copy } from "./i18n";
 import type {
   AdminPage,
   AgentHistorySnapshot,
@@ -20,8 +20,10 @@ import type {
   ChatHistorySnapshot,
   HistoryDetail,
   HistorySummary,
+  ModelCatalogItem,
   ModelOptionValue,
   OAuthProvider,
+  PublicModelCatalog,
   ThemeMode,
   UiLocale,
   WorkspaceMode,
@@ -46,7 +48,9 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [deletingHistoryId, setDeletingHistoryId] = useState<number | null>(null);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
-  const [model, setModel] = useState<ModelOptionValue>("qwen3.5-plus");
+  const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
+  const [agentModel, setAgentModel] = useState<ModelOptionValue>("");
+  const [chatModel, setChatModel] = useState<ModelOptionValue>("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const oauthReturnRef = useRef(false);
@@ -62,14 +66,14 @@ function App() {
   } = useSidebarLayout();
 
   const dict = copy[locale];
-  const activeModel = modelOptions.find((item) => item.value === model) ?? modelOptions[0];
+  const activeChatModel = availableModels.find((item) => item.value === chatModel) ?? availableModels[0];
   const canAccessAdmin = currentUser?.role === "admin";
   const showUpgrade = currentUser?.role === "basic";
 
   const repair = useRepairSession({
     apiBaseUrl,
     dict,
-    model,
+    model: agentModel,
     refreshHistoryList: fetchHistoryList,
     selectHistory: setSelectedHistoryId,
     upsertHistoryItem,
@@ -77,7 +81,7 @@ function App() {
 
   const chat = useChatSession({
     apiBaseUrl,
-    model,
+    model: chatModel,
     refreshHistoryList: fetchHistoryList,
     selectHistory: setSelectedHistoryId,
     upsertHistoryItem,
@@ -87,6 +91,7 @@ function App() {
     apiBaseUrl,
     enabled: Boolean(currentUser && canAccessAdmin && workspaceMode === "admin"),
     refreshSession: refreshSessionState,
+    refreshModels: fetchModelCatalog,
   });
 
   const billing = useBillingCenter({
@@ -100,6 +105,35 @@ function App() {
       const filtered = current.filter((item) => item.id !== summary.id);
       return [summary, ...filtered];
     });
+  }
+
+  function pickModelValue(
+    requested: string | null | undefined,
+    items: ModelCatalogItem[],
+    fallback: string | null | undefined,
+  ) {
+    if (requested && items.some((item) => item.value === requested)) {
+      return requested;
+    }
+    if (fallback && items.some((item) => item.value === fallback)) {
+      return fallback;
+    }
+    return items[0]?.value ?? "";
+  }
+
+  async function fetchModelCatalog() {
+    const response = await fetch(`${apiBaseUrl}/api/models`, {
+      credentials: "include",
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as PublicModelCatalog;
+    const items = Array.isArray(data.items) ? data.items : [];
+    setAvailableModels(items);
+    setAgentModel((current) => pickModelValue(current, items, data.default_repair_model));
+    setChatModel((current) => pickModelValue(current, items, data.default_chat_model));
+    return data;
   }
 
   async function fetchSession() {
@@ -161,6 +195,14 @@ function App() {
     const storedLocale = window.localStorage.getItem("autorepair-locale") as UiLocale | null;
     setLocale(storedLocale ?? "zh");
   }, []);
+
+  useEffect(() => {
+    void fetchModelCatalog().catch(() => {
+      setAvailableModels([]);
+      setAgentModel("");
+      setChatModel("");
+    });
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -358,7 +400,7 @@ function App() {
         const snapshot = detail.snapshot as ChatHistorySnapshot;
         setWorkspaceMode("chat");
         if (detail.model) {
-          setModel(detail.model);
+          setChatModel((current) => pickModelValue(detail.model, availableModels, current));
         }
         chat.loadHistorySnapshot(detail.id, snapshot);
         repair.prepareForChatHistoryView();
@@ -369,7 +411,7 @@ function App() {
       setWorkspaceMode("agent");
       chat.resetChatState({ clearActiveHistoryId: true });
       if (snapshot.model) {
-        setModel(snapshot.model);
+        setAgentModel((current) => pickModelValue(snapshot.model, availableModels, current));
       }
       repair.loadHistorySnapshot(snapshot);
     } catch (error) {
@@ -449,7 +491,7 @@ function App() {
 
         {sessionLoading ? (
           <div className="grid min-h-[82vh] place-items-center">
-            <div className="rounded-[32px] border border-black/5 bg-white/72 px-8 py-6 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
+            <div className="rounded-[32px] border border-black/5 bg-white/72 px-8 py-6 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
               <div className="text-sm uppercase tracking-[0.28em] text-slate-500 dark:text-white/45">
                 {dict.authLoading}
               </div>
@@ -536,12 +578,14 @@ function App() {
                   activityPage={admin.activityPage}
                   adminError={admin.adminError}
                   adminLoading={admin.adminLoading}
+                  adminModelMutatingId={admin.adminModelMutatingId}
                   adminPage={admin.adminPage}
                   adminPaymentActingOrderId={admin.adminPaymentActingOrderId}
                   adminUserRoleUpdatingId={admin.adminUserRoleUpdatingId}
                   copy={dict}
                   dashboardData={admin.dashboardData}
                   loginEvents={admin.loginEvents}
+                  modelConfigs={admin.modelConfigs}
                   modelUsage={admin.modelUsage}
                   modelUsageDays={admin.modelUsageDays}
                   paymentFilters={admin.paymentFilters}
@@ -554,6 +598,8 @@ function App() {
                   users={admin.users}
                   workspaceMainClass={workspaceMainClass}
                   onActivityPageChange={admin.setActivityPage}
+                  onCreateModelConfig={admin.createAdminModelConfig}
+                  onDeleteModelConfig={admin.deleteAdminModelConfig}
                   onModelUsageDaysChange={admin.setModelUsageDays}
                   onApprovePaymentOrder={(orderId) => {
                     void admin.approvePaymentOrder(orderId);
@@ -562,6 +608,7 @@ function App() {
                   onRefresh={admin.refreshAdminData}
                   onRequestFiltersChange={admin.setRequestFilters}
                   onSelectRequest={admin.setSelectedRequestId}
+                  onUpdateModelConfig={admin.updateAdminModelConfig}
                   onUpdateUserRole={(userId, role) => {
                     void admin.updateUserRole(userId, role);
                   }}
@@ -603,7 +650,8 @@ function App() {
                   inputText={repair.inputText}
                   language={repair.language}
                   locale={locale}
-                  model={model}
+                  model={agentModel}
+                  modelOptions={availableModels}
                   projectSubdir={repair.projectSubdir}
                   projectEntrypointOptions={repair.projectEntrypointOptions}
                   projectFilesLoading={repair.projectFilesLoading}
@@ -622,7 +670,7 @@ function App() {
                   onGithubRepoUrlChange={repair.setGithubRepoUrl}
                   onInputTextChange={repair.setInputText}
                   onLanguageChange={repair.setLanguage}
-                  onModelChange={setModel}
+                  onModelChange={setAgentModel}
                   onProjectSubdirChange={repair.setProjectSubdir}
                   onReset={handleReset}
                   onSend={repair.handleSend}
@@ -633,7 +681,7 @@ function App() {
                 />
               ) : (
                 <ChatWorkspace
-                  activeModelLabel={activeModel.label}
+                  activeModelLabel={activeChatModel?.label ?? chatModel}
                   chatError={chat.chatError}
                   chatInput={chat.chatInput}
                   chatMessages={chat.chatMessages}
@@ -641,9 +689,10 @@ function App() {
                   chatThinking={chat.chatThinking}
                   copy={dict}
                   isDesktopLayout={isDesktopLayout}
-                  model={model}
+                  model={chatModel}
+                  modelOptions={availableModels}
                   onChatInputChange={chat.setChatInput}
-                  onModelChange={setModel}
+                  onModelChange={setChatModel}
                   onSend={chat.handleChatSend}
                 />
               )}

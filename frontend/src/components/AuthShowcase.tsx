@@ -144,7 +144,7 @@ export function AuthShowcase({ locale }: { locale: "zh" | "en" }) {
   const features = locale === "zh" ? FEATURES_ZH : FEATURES_EN;
 
   return (
-    <section className="relative flex h-full flex-col items-center justify-center overflow-hidden rounded-[36px] border border-black/5 bg-slate-950 shadow-float dark:border-white/10 dark:shadow-glow">
+    <section className="relative flex h-full flex-col items-center justify-center overflow-hidden rounded-[36px] border border-black/5 bg-slate-950 dark:border-white/10">
       <canvas
         ref={canvasRef}
         className="pointer-events-none absolute inset-0 h-full w-full"

@@ -98,7 +98,7 @@ export function AppHeader({
             </button>
 
             {userMenuOpen ? (
-              <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[60] min-w-[240px] rounded-[24px] border border-black/10 bg-white/92 p-2 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-ink-900/95 dark:shadow-glow">
+              <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[60] min-w-[240px] rounded-[24px] border border-black/10 bg-white/92 p-2 backdrop-blur-xl dark:border-white/10 dark:bg-ink-900/95">
                 <div className="rounded-[18px] px-3 py-3 text-sm text-slate-600 dark:text-white/70">
                   <div className="font-medium text-slate-900 dark:text-white">
                     {currentUser.display_name}

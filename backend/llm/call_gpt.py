@@ -20,10 +20,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "information that will be helpful to locate the bug and implement the bug "
     "fix."
 )
-QWEN_API_KEY = os.getenv("QWEN_API_KEY")
-
-API_KEY = QWEN_API_KEY
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MAX_TOOL_ROUNDS = 8
 MAX_TOOL_EVENT_PREVIEW_CHARS = 600
 
@@ -36,11 +33,22 @@ def create_openai_client(
     api_key: str | None = None,
     base_url: str | None = None,
 ) -> OpenAI:
-    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY") or API_KEY
+    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("QWEN_API_KEY")
     if not resolved_api_key:
-        raise LLMCallError("OPENAI_API_KEY is not set.")
+        raise LLMCallError("No OpenAI-compatible API key is configured.")
 
-    resolved_base_url = os.getenv("OPENAI_BASE_URL") or (BASE_URL if base_url is None else base_url)
+    if base_url is not None:
+        resolved_base_url = base_url.strip() or None
+    elif api_key is not None:
+        resolved_base_url = os.getenv("OPENAI_BASE_URL") or None
+    elif os.getenv("OPENAI_API_KEY"):
+        resolved_base_url = os.getenv("OPENAI_BASE_URL") or None
+    else:
+        resolved_base_url = (
+            os.getenv("QWEN_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or DASHSCOPE_BASE_URL
+        )
     if resolved_base_url:
         return OpenAI(api_key=resolved_api_key, base_url=resolved_base_url)
     return OpenAI(api_key=resolved_api_key)
@@ -240,6 +248,7 @@ def _call_with_tools(
     tools: list[FunctionTool],
     tool_event_handler: Callable[[str, dict[str, Any]], None] | None,
     metadata_handler: Callable[[dict[str, Any]], None] | None,
+    extra_body: dict[str, Any] | None,
 ) -> dict[str, Any] | str:
     tool_registry = {tool.name: tool for tool in tools}
     messages: list[dict[str, Any]] = [
@@ -258,11 +267,14 @@ def _call_with_tools(
 
     for round_index in range(MAX_TOOL_ROUNDS):
         try:
-            response = resolved_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=[tool.as_openai_tool() for tool in tools],
-            )
+            request_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "tools": [tool.as_openai_tool() for tool in tools],
+            }
+            if extra_body:
+                request_kwargs["extra_body"] = extra_body
+            response = resolved_client.chat.completions.create(**request_kwargs)
         except Exception as exc:
             raise LLMCallError(f"OpenAI request failed: {exc}") from exc
 
@@ -350,6 +362,8 @@ def call_llm_for_json(
     client: OpenAI | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    thinking_enabled: bool = False,
+    extra_body: dict[str, Any] | None = None,
     isJson: bool = True,
     stream: bool = False,
     stream_handler: Callable[[str], None] | None = None,
@@ -380,6 +394,7 @@ def call_llm_for_json(
             tools=tools,
             tool_event_handler=tool_event_handler,
             metadata_handler=metadata_handler,
+            extra_body=extra_body,
         )
 
     try:
@@ -392,6 +407,8 @@ def call_llm_for_json(
                 {"role": "user", "content": prompt},
             ],
         }
+        if extra_body:
+            request_kwargs["extra_body"] = extra_body
         if stream and not isJson:
             response = resolved_client.chat.completions.create(
                 **request_kwargs,

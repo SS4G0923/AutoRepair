@@ -4,6 +4,8 @@ import type { AppCopy } from "../../i18n";
 import type {
   AdminDashboardData,
   AdminLoginEventList,
+  AdminModelConfigItem,
+  AdminModelConfigPayload,
   AdminLlmRequestDetail,
   AdminLlmRequestList,
   AdminModelUsageReport,
@@ -23,11 +25,13 @@ interface AdminWorkspaceProps {
   adminError: string;
   adminLoading: boolean;
   adminPage: AdminPage;
+  adminModelMutatingId: number | "create" | null;
   adminPaymentActingOrderId: number | null;
   adminUserRoleUpdatingId: number | null;
   copy: AppCopy;
   dashboardData: AdminDashboardData | null;
   loginEvents: AdminLoginEventList | null;
+  modelConfigs: AdminModelConfigItem[];
   modelUsage: AdminModelUsageReport | null;
   modelUsageDays: number;
   paymentFilters: AdminPaymentFilters;
@@ -41,11 +45,14 @@ interface AdminWorkspaceProps {
   workspaceMainClass: string;
   onActivityPageChange: (page: number) => void;
   onModelUsageDaysChange: (days: number) => void;
+  onCreateModelConfig: (payload: AdminModelConfigPayload) => Promise<void>;
+  onDeleteModelConfig: (modelConfigId: number) => Promise<void>;
   onApprovePaymentOrder: (orderId: number) => void;
   onPaymentFiltersChange: Dispatch<SetStateAction<AdminPaymentFilters>>;
   onRefresh: () => void;
   onRequestFiltersChange: Dispatch<SetStateAction<AdminRequestFilters>>;
-  onSelectRequest: (requestId: number) => void;
+  onSelectRequest: (requestId: number | null) => void;
+  onUpdateModelConfig: (modelConfigId: number, payload: AdminModelConfigPayload) => Promise<void>;
   onUpdateUserRole: (userId: number, role: AdminUserItem["role"]) => void;
   onRejectPaymentOrder: (orderId: number) => void;
 }
@@ -55,11 +62,13 @@ export function AdminWorkspace({
   adminError,
   adminLoading,
   adminPage,
+  adminModelMutatingId,
   adminPaymentActingOrderId,
   adminUserRoleUpdatingId,
   copy,
   dashboardData,
   loginEvents,
+  modelConfigs,
   modelUsage,
   modelUsageDays,
   paymentFilters,
@@ -72,12 +81,15 @@ export function AdminWorkspace({
   users,
   workspaceMainClass,
   onActivityPageChange,
+  onCreateModelConfig,
+  onDeleteModelConfig,
   onModelUsageDaysChange,
   onApprovePaymentOrder,
   onPaymentFiltersChange,
   onRefresh,
   onRequestFiltersChange,
   onSelectRequest,
+  onUpdateModelConfig,
   onUpdateUserRole,
   onRejectPaymentOrder,
 }: AdminWorkspaceProps) {
@@ -118,7 +130,7 @@ export function AdminWorkspace({
 
   return (
     <section
-      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow ${workspaceMainClass}`}
+      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 ${workspaceMainClass}`}
     >
       <div className="shrink-0 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -169,8 +181,13 @@ export function AdminWorkspace({
           <AdminModelsPage
             copy={copy}
             days={modelUsageDays}
+            modelConfigs={modelConfigs}
             modelUsage={modelUsage}
+            mutatingModelId={adminModelMutatingId}
+            onCreateModelConfig={onCreateModelConfig}
+            onDeleteModelConfig={onDeleteModelConfig}
             onDaysChange={onModelUsageDaysChange}
+            onUpdateModelConfig={onUpdateModelConfig}
           />
         ) : adminPage === "payments" ? (
           <AdminPaymentsPage

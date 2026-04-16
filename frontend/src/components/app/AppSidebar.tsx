@@ -96,7 +96,7 @@ export function AppSidebar({
     <aside
       className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden pr-1 ${!isDesktopLayout ? "shrink-0" : ""}`}
     >
-      <section className="shrink-0 rounded-[22px] border border-black/5 bg-white/72 p-2.5 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
+      <section className="shrink-0 rounded-[22px] border border-black/5 bg-white/72 p-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
         <div className="px-2 text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
           {copy.sidebarWorkspace}
         </div>
@@ -180,7 +180,7 @@ export function AppSidebar({
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col rounded-[22px] border border-black/5 bg-white/72 p-2.5 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
+      <section className="flex min-h-0 flex-1 flex-col rounded-[22px] border border-black/5 bg-white/72 p-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
         <div className="shrink-0 px-2 text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
           {workspaceMode === "admin" ? copy.adminNavTitle : copy.sidebarHistory}
         </div>

@@ -265,7 +265,7 @@ export function useRepairSession({
         input_text: inputText,
         filename: normalizedEntrypoint || defaultEntrypointForLanguage(language),
         language,
-        model,
+        ...(model ? { model } : {}),
       };
     }
 
@@ -280,7 +280,7 @@ export function useRepairSession({
         filename: selectedProjectEntrypoint,
         input_text: inputText,
         language: selectedProjectLanguage,
-        model,
+        ...(model ? { model } : {}),
         project_zip_base64: zipFileBase64,
         ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
       };
@@ -298,7 +298,7 @@ export function useRepairSession({
       filename: selectedProjectEntrypoint,
       input_text: inputText,
       language: selectedProjectLanguage,
-      model,
+      ...(model ? { model } : {}),
       github_repo_url: normalizedRepoUrl,
       ...(normalizedRef ? { github_ref: normalizedRef } : {}),
       ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),

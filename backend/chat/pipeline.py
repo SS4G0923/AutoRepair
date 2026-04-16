@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from backend.llm import call_llm_for_json
+from backend.llm.store import resolve_model_selection
 from backend.llm.telemetry import LLMCallContext
 
-DEFAULT_CHAT_MODEL = "qwen3.5-plus"
 MAX_MESSAGES = 40
 MAX_MESSAGE_CHARS = 20_000
 
@@ -34,7 +34,7 @@ class ChatMessage:
 @dataclass(frozen=True)
 class ChatRequest:
     messages: list[ChatMessage]
-    model: str = DEFAULT_CHAT_MODEL
+    model: str
     history_id: int | None = None
 
     @classmethod
@@ -67,9 +67,13 @@ class ChatRequest:
         if messages[-1].role != "user":
             raise ValueError("The last chat message must be from the user.")
 
-        model = payload.get("model", DEFAULT_CHAT_MODEL)
-        if not isinstance(model, str) or not model.strip():
-            raise ValueError("`model` must be a non-empty string.")
+        raw_model = payload.get("model")
+        if raw_model is not None and (not isinstance(raw_model, str) or not raw_model.strip()):
+            raise ValueError("`model` must be a non-empty string when provided.")
+        resolved_model = resolve_model_selection(
+            raw_model.strip() if isinstance(raw_model, str) and raw_model.strip() else None,
+            purpose="chat",
+        )
 
         raw_history_id = payload.get("history_id")
         history_id: int | None = None
@@ -78,7 +82,7 @@ class ChatRequest:
                 raise ValueError("`history_id` must be a positive integer.")
             history_id = raw_history_id
 
-        return cls(messages=messages, model=model.strip(), history_id=history_id)
+        return cls(messages=messages, model=resolved_model.model_key, history_id=history_id)
 
 
 def _build_chat_prompt(messages: list[ChatMessage]) -> str:

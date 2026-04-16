@@ -1,5 +1,5 @@
-import { AppCopy, modelOptions } from "../../i18n";
-import type { ChatMessage, ModelOptionValue } from "../../types";
+import { AppCopy } from "../../i18n";
+import type { ChatMessage, ModelCatalogItem, ModelOptionValue } from "../../types";
 
 interface ChatWorkspaceProps {
   activeModelLabel: string;
@@ -11,6 +11,7 @@ interface ChatWorkspaceProps {
   copy: AppCopy;
   isDesktopLayout: boolean;
   model: ModelOptionValue;
+  modelOptions: ModelCatalogItem[];
   onChatInputChange: (value: string) => void;
   onModelChange: (value: ModelOptionValue) => void;
   onSend: () => void;
@@ -26,13 +27,14 @@ export function ChatWorkspace({
   copy,
   isDesktopLayout,
   model,
+  modelOptions,
   onChatInputChange,
   onModelChange,
   onSend,
 }: ChatWorkspaceProps) {
   return (
     <section
-      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow ${!isDesktopLayout ? "flex-1" : ""}`}
+      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 ${!isDesktopLayout ? "flex-1" : ""}`}
     >
       <div className="shrink-0 flex items-center justify-between gap-3">
         <div className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
@@ -41,13 +43,18 @@ export function ChatWorkspace({
         <select
           value={model}
           onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
+          disabled={modelOptions.length === 0}
           className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
         >
-          {modelOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {copy.model}: {option.label}
-            </option>
-          ))}
+          {modelOptions.length > 0 ? (
+            modelOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {copy.model}: {option.label}
+              </option>
+            ))
+          ) : (
+            <option value="">{copy.modelEmpty}</option>
+          )}
         </select>
       </div>
 
@@ -116,7 +123,7 @@ export function ChatWorkspace({
           </div>
           <button
             onClick={onSend}
-            disabled={!chatInput.trim() || chatThinking}
+            disabled={!chatInput.trim() || chatThinking || modelOptions.length === 0}
             className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
           >
             {copy.chatSend}

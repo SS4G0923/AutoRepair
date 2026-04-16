@@ -77,7 +77,7 @@ export function BillingWorkspace({
 
   return (
     <section
-      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow ${workspaceMainClass}`}
+      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 ${workspaceMainClass}`}
     >
       {/* ── header ── */}
       <div className="shrink-0 flex items-center justify-between gap-3">

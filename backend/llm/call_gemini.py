@@ -141,6 +141,7 @@ def call_llm_for_json(
     model: str = DEFAULT_MODEL,
     client: Any | None = None,
     api_key: str | None = None,
+    thinking_enabled: bool = False,
     isJson: bool = True,
     stream: bool = False,
     stream_handler: Callable[[str], None] | None = None,
@@ -165,6 +166,8 @@ def call_llm_for_json(
             system_instruction=system_prompt,
             response_mime_type="application/json" if isJson else "text/plain",
         )
+        if not thinking_enabled:
+            config.thinking_config = types.ThinkingConfig(thinkingBudget=0)
         if stream and not isJson:
             response_stream = resolved_client.models.generate_content_stream(
                 model=model,

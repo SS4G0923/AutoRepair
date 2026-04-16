@@ -47,6 +47,13 @@ from backend.history.store import (
     save_history,
     soft_delete_history_for_user,
 )
+from backend.llm.store import (
+    create_model_config,
+    delete_model_config,
+    list_model_configs_for_admin,
+    list_public_model_catalog,
+    update_model_config,
+)
 from backend.repair.pipeline import RepairRequest, run_repair_pipeline
 from backend.repair.workspace import list_project_entrypoint_options
 
@@ -227,6 +234,98 @@ def _validate_payment_order_payload(payload: dict[str, Any]) -> tuple[str, str]:
     if payment_method not in {"card", "paypal", "wechat", "alipay"}:
         raise ValueError("`payment_method` must be one of: card, paypal, wechat, alipay.")
     return plan_code, payment_method
+
+
+def _normalize_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _validate_model_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    provider_code = str(payload.get("provider_code", "")).strip().lower()
+    provider_name = str(payload.get("provider_name", "")).strip()
+    vendor_name = str(payload.get("vendor_name", "")).strip() or provider_name
+    model_key = str(payload.get("model_key", "")).strip()
+    display_name = str(payload.get("display_name", "")).strip()
+    api_model_name = str(payload.get("api_model_name", "")).strip()
+    api_base_url = str(payload.get("api_base_url", "")).strip() or None
+    api_key_env_var = str(payload.get("api_key_env_var", "")).strip() or None
+    notes = str(payload.get("notes", "")).strip() or None
+    extra_config = payload.get("extra_config")
+
+    if provider_code not in {"openai_compatible", "gemini"}:
+        raise ValueError("`provider_code` must be `openai_compatible` or `gemini`.")
+    if not provider_name:
+        raise ValueError("`provider_name` is required.")
+    if not vendor_name:
+        raise ValueError("`vendor_name` is required.")
+    if not model_key:
+        raise ValueError("`model_key` is required.")
+    if not display_name:
+        raise ValueError("`display_name` is required.")
+    if not api_model_name:
+        raise ValueError("`api_model_name` is required.")
+    if len(model_key) > 128:
+        raise ValueError("`model_key` must be at most 128 characters.")
+    if len(display_name) > 120:
+        raise ValueError("`display_name` must be at most 120 characters.")
+    if len(provider_name) > 64 or len(vendor_name) > 64:
+        raise ValueError("`provider_name` and `vendor_name` must be at most 64 characters.")
+    if len(api_model_name) > 128:
+        raise ValueError("`api_model_name` must be at most 128 characters.")
+    if api_base_url is not None and len(api_base_url) > 512:
+        raise ValueError("`api_base_url` must be at most 512 characters.")
+    if api_key_env_var is not None and len(api_key_env_var) > 64:
+        raise ValueError("`api_key_env_var` must be at most 64 characters.")
+    if notes is not None and len(notes) > 2000:
+        raise ValueError("`notes` must be at most 2000 characters.")
+
+    if extra_config is None:
+        normalized_extra_config: dict[str, Any] = {}
+    elif isinstance(extra_config, dict):
+        normalized_extra_config = extra_config
+    else:
+        raise ValueError("`extra_config` must be an object when provided.")
+
+    sort_order = payload.get("sort_order", 0)
+    if not isinstance(sort_order, int):
+        raise ValueError("`sort_order` must be an integer.")
+
+    return {
+        "provider_code": provider_code,
+        "provider_name": provider_name,
+        "vendor_name": vendor_name,
+        "model_key": model_key,
+        "display_name": display_name,
+        "api_model_name": api_model_name,
+        "api_base_url": api_base_url,
+        "api_key_env_var": api_key_env_var,
+        "enabled": _normalize_bool(payload.get("enabled"), default=True),
+        "is_default_chat": _normalize_bool(payload.get("is_default_chat"), default=False),
+        "is_default_repair": _normalize_bool(payload.get("is_default_repair"), default=False),
+        "supports_streaming": _normalize_bool(payload.get("supports_streaming"), default=True),
+        "supports_json": _normalize_bool(payload.get("supports_json"), default=True),
+        "sort_order": sort_order,
+        "notes": notes,
+        "extra_config": {
+            **normalized_extra_config,
+            "thinking_enabled": _normalize_bool(
+                payload.get("thinking_enabled", normalized_extra_config.get("thinking_enabled")),
+                default=False,
+            ),
+        },
+    }
 
 
 def _require_login(view_func):
@@ -436,6 +535,13 @@ def auth_session() -> Response:
     return jsonify(_build_auth_session_response())
 
 
+@app.route("/api/models", methods=["GET", "OPTIONS"])
+def public_models() -> Response:
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    return jsonify(list_public_model_catalog())
+
+
 @app.route("/api/auth/register", methods=["POST", "OPTIONS"])
 def register() -> Response:
     if request.method == "OPTIONS":
@@ -642,6 +748,51 @@ def admin_llm_request_detail(request_id: int) -> Response:
 def admin_model_usage() -> Response:
     days = request.args.get("days", default=30, type=int) or 30
     return jsonify(get_model_usage_report(days=days))
+
+
+@app.route("/api/admin/model-configs", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_model_configs() -> Response:
+    return jsonify({"items": list_model_configs_for_admin()})
+
+
+@app.route("/api/admin/model-configs", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_model_configs_create() -> Response:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+    try:
+        item = create_model_config(**_validate_model_config_payload(payload))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"item": item})
+
+
+@app.route("/api/admin/model-configs/<int:model_config_id>", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_model_configs_update(model_config_id: int) -> Response:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+    try:
+        item = update_model_config(
+            model_config_id=model_config_id,
+            **_validate_model_config_payload(payload),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"item": item})
+
+
+@app.route("/api/admin/model-configs/<int:model_config_id>", methods=["DELETE", "OPTIONS"])
+@_require_admin
+def admin_model_configs_delete(model_config_id: int) -> Response:
+    try:
+        delete_model_config(model_config_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "id": model_config_id})
 
 
 @app.route("/api/admin/login-events", methods=["GET", "OPTIONS"])

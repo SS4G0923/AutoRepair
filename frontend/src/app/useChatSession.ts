@@ -99,7 +99,7 @@ export function useChatSession({
         },
         body: JSON.stringify({
           messages: requestMessages,
-          model,
+          ...(model ? { model } : {}),
           history_id: activeChatHistoryId,
         }),
         signal: controller.signal,

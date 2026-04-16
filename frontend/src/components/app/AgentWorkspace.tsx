@@ -1,9 +1,10 @@
 import { CodeEditor } from "../CodeEditor";
 import { StageCard } from "../StageCard";
-import { AppCopy, languageOptions, modelOptions, stageOrder } from "../../i18n";
+import { AppCopy, languageOptions, stageOrder } from "../../i18n";
 import type {
   AgentSourceType,
   CodeLanguage,
+  ModelCatalogItem,
   ModelOptionValue,
   ProjectEntrypointOption,
   RunResult,
@@ -29,6 +30,7 @@ interface AgentWorkspaceProps {
   language: CodeLanguage;
   locale: UiLocale;
   model: ModelOptionValue;
+  modelOptions: ModelCatalogItem[];
   projectSubdir: string;
   projectEntrypointOptions: ProjectEntrypointOption[];
   projectFilesLoading: boolean;
@@ -73,6 +75,7 @@ export function AgentWorkspace({
   language,
   locale,
   model,
+  modelOptions,
   projectSubdir,
   projectEntrypointOptions,
   projectFilesLoading,
@@ -104,7 +107,7 @@ export function AgentWorkspace({
     <div className={workspaceMainClass}>
       <div className="grid h-full min-h-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <section className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pr-1">
-          <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-black/5 bg-white/72 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
+          <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-black/5 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
             <div className="shrink-0 flex flex-col gap-4">
               <div className={`flex gap-3 ${agentSourceType === "single_file" ? "items-start" : "items-center"}`}>
                 <div className="flex items-center gap-1.5 rounded-full border border-black/5 bg-black/[0.03] p-1 dark:border-white/10 dark:bg-white/[0.03]">
@@ -150,13 +153,18 @@ export function AgentWorkspace({
                   <select
                     value={model}
                     onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
+                    disabled={modelOptions.length === 0}
                     className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
                   >
-                    {modelOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {copy.model}: {option.label}
-                      </option>
-                    ))}
+                    {modelOptions.length > 0 ? (
+                      modelOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {copy.model}: {option.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">{copy.modelEmpty}</option>
+                    )}
                   </select>
                 </div>
               </div>
@@ -358,7 +366,7 @@ export function AgentWorkspace({
             <div className="mt-3 shrink-0 flex flex-wrap items-center gap-2">
               <button
                 onClick={onSend}
-                disabled={status === "streaming" || !languageSupported}
+                disabled={status === "streaming" || !languageSupported || modelOptions.length === 0}
                 className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
               >
                 {copy.send}
@@ -385,7 +393,7 @@ export function AgentWorkspace({
 
         <section className="h-full min-h-0 min-w-0 space-y-3 overflow-y-auto pr-1">
           {(runResult || errorMessage || finalMessage || finalDiff) ? (
-            <section className="rounded-[20px] border border-black/5 bg-white/75 p-3 shadow-float backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-glow">
+            <section className="rounded-[20px] border border-black/5 bg-white/75 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
               <div className="flex items-center justify-between gap-4">
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/80">
                   {copy.runOutput}

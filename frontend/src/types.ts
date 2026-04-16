@@ -27,6 +27,22 @@ export interface ModelOption {
   label: string;
 }
 
+export interface ModelCatalogItem extends ModelOption {
+  provider_code: string;
+  provider_name: string;
+  vendor_name: string;
+  supports_streaming: boolean;
+  supports_json: boolean;
+  is_default_chat: boolean;
+  is_default_repair: boolean;
+}
+
+export interface PublicModelCatalog {
+  items: ModelCatalogItem[];
+  default_chat_model: string | null;
+  default_repair_model: string | null;
+}
+
 export interface ToolEventEntry {
   id: string;
   tool_name: string;
@@ -294,6 +310,54 @@ export interface AdminModelUsageReport {
     request_count: number;
     total_tokens: number;
   }>;
+}
+
+export interface AdminModelConfigItem {
+  id: number;
+  provider_code: "openai_compatible" | "gemini";
+  provider_name: string;
+  vendor_name: string;
+  model_key: string;
+  display_name: string;
+  api_model_name: string;
+  api_base_url: string | null;
+  api_key_env_var: string | null;
+  enabled: boolean;
+  is_default_chat: boolean;
+  is_default_repair: boolean;
+  supports_streaming: boolean;
+  supports_json: boolean;
+  thinking_enabled: boolean;
+  sort_order: number;
+  notes: string | null;
+  extra_config: Record<string, unknown>;
+  api_key_configured: boolean;
+  missing_configuration: string[];
+  request_count_30d: number;
+  total_tokens_30d: number;
+  last_used_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AdminModelConfigPayload {
+  provider_code: "openai_compatible" | "gemini";
+  provider_name: string;
+  vendor_name: string;
+  model_key: string;
+  display_name: string;
+  api_model_name: string;
+  api_base_url: string;
+  api_key_env_var: string;
+  enabled: boolean;
+  is_default_chat: boolean;
+  is_default_repair: boolean;
+  supports_streaming: boolean;
+  supports_json: boolean;
+  thinking_enabled: boolean;
+  sort_order: number;
+  notes: string;
+  extra_config: Record<string, unknown>;
 }
 
 export interface AdminLoginEventItem {
