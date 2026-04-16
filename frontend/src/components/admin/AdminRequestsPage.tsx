@@ -72,7 +72,7 @@ export function AdminRequestsPage({
               }))
             }
             placeholder={copy.adminSearchPlaceholder}
-            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+            className="rounded-xl border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
           />
           <input
             value={requestFilters.model}
@@ -84,7 +84,7 @@ export function AdminRequestsPage({
               }))
             }
             placeholder={copy.adminFilterModel}
-            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+            className="rounded-xl border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
           />
           <select
             value={requestFilters.status}
@@ -95,7 +95,7 @@ export function AdminRequestsPage({
                 status: event.target.value,
               }))
             }
-            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.adminFilterStatus}: {copy.adminFilterAll}</option>
             <option value="completed">{copy.adminFilterCompleted}</option>
@@ -110,7 +110,7 @@ export function AdminRequestsPage({
                 requestMode: event.target.value,
               }))
             }
-            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.adminFilterMode}: {copy.adminFilterAll}</option>
             <option value="chat">{copy.adminFilterChat}</option>
@@ -162,8 +162,8 @@ export function AdminRequestsPage({
                 key={item.id}
                 className={`rounded-2xl border px-3 py-3 transition ${
                   active
-                    ? "border-slate-900 bg-white/80 shadow-md dark:border-white/20 dark:bg-white/[0.04]"
-                    : "border-black/5 bg-white/60 hover:bg-white/80 dark:border-white/10 dark:bg-white/[0.02] dark:hover:bg-white/[0.04]"
+                    ? "border-slate-900 bg-white/50 dark:border-white/20 dark:bg-white/[0.04]"
+                    : "border-black/5 bg-white/60 hover:bg-white/50 dark:border-white/10 dark:bg-white/[0.02] dark:hover:bg-white/[0.04]"
                 }`}
               >
                 {/* Summary Row */}

@@ -107,7 +107,7 @@ export function AgentWorkspace({
     <div className={workspaceMainClass}>
       <div className="grid h-full min-h-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <section className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pr-1">
-          <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-black/5 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
             <div className="shrink-0 flex flex-col gap-4">
               <div className={`flex gap-3 ${agentSourceType === "single_file" ? "items-start" : "items-center"}`}>
                 <div className="flex items-center gap-1.5 rounded-full border border-black/5 bg-black/[0.03] p-1 dark:border-white/10 dark:bg-white/[0.03]">
@@ -123,7 +123,7 @@ export function AgentWorkspace({
                       onClick={() => onSourceTypeChange(value)}
                       className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition ${
                         agentSourceType === value
-                          ? "bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-950"
+                          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                           : "text-slate-600 hover:text-slate-900 dark:text-white/65 dark:hover:text-white"
                       }`}
                     >
@@ -137,7 +137,7 @@ export function AgentWorkspace({
                     <select
                       value={language}
                       onChange={(event) => onLanguageChange(event.target.value as CodeLanguage)}
-                      className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                      className="rounded-full border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
                     >
                       {languageOptions.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -146,7 +146,7 @@ export function AgentWorkspace({
                       ))}
                     </select>
                   ) : (
-                    <div className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                    <div className="rounded-full border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white">
                       {copy.detectedLanguage}: {languageOptions.find((option) => option.value === language)?.label ?? language}
                     </div>
                   )}
@@ -154,7 +154,7 @@ export function AgentWorkspace({
                     value={model}
                     onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
                     disabled={modelOptions.length === 0}
-                    className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                    className="rounded-full border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
                   >
                     {modelOptions.length > 0 ? (
                       modelOptions.map((option) => (
@@ -179,7 +179,7 @@ export function AgentWorkspace({
                       <select
                         value={entrypointPath}
                         onChange={(event) => onEntrypointChange(event.target.value)}
-                        className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                        className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                         disabled={projectFilesLoading || projectEntrypointOptions.length === 0}
                       >
                         {projectFilesLoading ? (
@@ -203,7 +203,7 @@ export function AgentWorkspace({
                         value={projectSubdir}
                         onChange={(event) => onProjectSubdirChange(event.target.value)}
                         placeholder="src"
-                        className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                        className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                       />
                     </label>
                   </div>
@@ -245,7 +245,7 @@ export function AgentWorkspace({
                       value={githubRepoUrl}
                       onChange={(event) => onGithubRepoUrlChange(event.target.value)}
                       placeholder="https://github.com/owner/repo"
-                      className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                      className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                     />
                   </label>
                   <label className="block">
@@ -256,7 +256,7 @@ export function AgentWorkspace({
                       value={githubRef}
                       onChange={(event) => onGithubRefChange(event.target.value)}
                       placeholder="main"
-                      className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                      className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                     />
                   </label>
                   <label className="block">
@@ -266,7 +266,7 @@ export function AgentWorkspace({
                     <select
                       value={entrypointPath}
                       onChange={(event) => onEntrypointChange(event.target.value)}
-                      className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                      className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                       disabled={projectFilesLoading || projectEntrypointOptions.length === 0}
                     >
                       {projectFilesLoading ? (
@@ -290,7 +290,7 @@ export function AgentWorkspace({
                       value={projectSubdir}
                       onChange={(event) => onProjectSubdirChange(event.target.value)}
                       placeholder="packages/api"
-                      className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                      className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                     />
                   </label>
                 </div>
@@ -305,7 +305,7 @@ export function AgentWorkspace({
                   onChange={(event) => onInputTextChange(event.target.value)}
                   placeholder={copy.programInputHint}
                   rows={agentSourceType === "single_file" ? 4 : 3}
-                  className="w-full rounded-[18px] border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                  className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                 />
               </label>
             </div>
@@ -322,7 +322,7 @@ export function AgentWorkspace({
               ) : (
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[28px] border border-black/5 bg-black/[0.03] p-5 dark:border-white/10 dark:bg-white/[0.03]">
                   <div className="grid gap-4 lg:grid-cols-2">
-                    <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70">
+                    <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70">
                       <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
                         {copy.entrypoint}
                       </div>
@@ -330,7 +330,7 @@ export function AgentWorkspace({
                         {entrypointPath.trim() || (projectFilesLoading ? copy.projectFilesLoading : copy.projectFilesEmpty)}
                       </div>
                     </div>
-                    <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70">
+                    <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70">
                       <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
                         {copy.projectSubdir}
                       </div>
@@ -338,7 +338,7 @@ export function AgentWorkspace({
                         {projectSubdir.trim() || "∅"}
                       </div>
                     </div>
-                    <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
+                    <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
                       <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
                         {agentSourceType === "zip" ? copy.zipUpload : copy.githubRepoUrl}
                       </div>
@@ -349,7 +349,7 @@ export function AgentWorkspace({
                       </div>
                     </div>
                     {agentSourceType === "github" ? (
-                      <div className="rounded-[22px] border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
+                      <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
                         <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
                           {copy.githubRef}
                         </div>
@@ -374,17 +374,17 @@ export function AgentWorkspace({
               <button
                 onClick={onStop}
                 disabled={status !== "streaming"}
-                className="rounded-full border border-black/10 bg-white/70 px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+                className="rounded-full border border-black/10 bg-white/50 px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
               >
                 {copy.stop}
               </button>
               <button
                 onClick={onReset}
-                className="rounded-full border border-black/10 bg-white/70 px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+                className="rounded-full border border-black/10 bg-white/50 px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
               >
                 {copy.reset}
               </button>
-                <div className="rounded-full border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-white/70">
+                <div className="rounded-full border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-white/70">
                   {statusText}
                 </div>
               </div>
@@ -393,7 +393,7 @@ export function AgentWorkspace({
 
         <section className="h-full min-h-0 min-w-0 space-y-3 overflow-y-auto pr-1">
           {(runResult || errorMessage || finalMessage || finalDiff) ? (
-            <section className="rounded-[20px] border border-black/5 bg-white/75 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+            <section className="rounded-[20px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
               <div className="flex items-center justify-between gap-4">
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/80">
                   {copy.runOutput}
@@ -471,7 +471,7 @@ export function AgentWorkspace({
                       </button>
                       <button
                         onClick={onSkipDiff}
-                        className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+                        className="rounded-full border border-black/10 bg-white/50 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
                       >
                         {copy.applyDecline}
                       </button>

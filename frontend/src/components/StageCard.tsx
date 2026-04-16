@@ -48,7 +48,7 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
   }
 
   return (
-    <section className="min-w-0 rounded-[24px] border border-black/5 bg-white/75 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+    <section className="min-w-0 rounded-[24px] border border-black/5 bg-white/50 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">{label}</div>
@@ -90,7 +90,7 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
             {state.toolEvents.map((item) => (
               <div
                 key={item.id}
-                className="rounded-[18px] border border-black/5 bg-white/70 p-3 dark:border-white/10 dark:bg-slate-950/70"
+                className="rounded-[18px] border border-black/5 bg-white/50 p-3 dark:border-white/10 dark:bg-slate-950/70"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">

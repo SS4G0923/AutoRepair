@@ -81,7 +81,7 @@ interface AdminSurfaceProps extends PropsWithChildren {
 export function AdminSurface({ children, className = "" }: AdminSurfaceProps) {
   return (
     <section
-      className={`rounded-[20px] border border-black/5 bg-white/70 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04] ${className}`.trim()}
+      className={`rounded-[20px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04] ${className}`.trim()}
     >
       {children}
     </section>

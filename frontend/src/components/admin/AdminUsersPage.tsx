@@ -112,7 +112,7 @@ export function AdminUsersPage({
                                 [user.id]: event.target.value as UserRole,
                               }))
                             }
-                            className="min-w-0 flex-1 rounded-xl border border-black/10 bg-white/70 px-2 py-1.5 text-[11px] text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+                            className="min-w-0 flex-1 rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-[11px] text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
                           >
                             <option value="basic">{copy.adminRoleBasic}</option>
                             <option value="advanced">{copy.adminRoleAdvanced}</option>

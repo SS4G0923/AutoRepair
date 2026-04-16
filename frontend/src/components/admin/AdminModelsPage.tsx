@@ -134,7 +134,7 @@ function ModelFormCard({
             onChange={(event) =>
               onChange(updateDraftField(draft, "provider_code", event.target.value as ModelFormState["provider_code"]))
             }
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           >
             <option value="openai_compatible">OpenAI Compatible</option>
             <option value="gemini">Gemini</option>
@@ -148,7 +148,7 @@ function ModelFormCard({
           <input
             value={draft.provider_name}
             onChange={(event) => onChange(updateDraftField(draft, "provider_name", event.target.value))}
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
 
@@ -159,7 +159,7 @@ function ModelFormCard({
           <input
             value={draft.vendor_name}
             onChange={(event) => onChange(updateDraftField(draft, "vendor_name", event.target.value))}
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
 
@@ -173,7 +173,7 @@ function ModelFormCard({
             onChange={(event) =>
               onChange(updateDraftField(draft, "sort_order", Number.parseInt(event.target.value || "0", 10) || 0))
             }
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
 
@@ -184,7 +184,7 @@ function ModelFormCard({
           <input
             value={draft.model_key}
             onChange={(event) => onChange(updateDraftField(draft, "model_key", event.target.value))}
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
 
@@ -195,7 +195,7 @@ function ModelFormCard({
           <input
             value={draft.display_name}
             onChange={(event) => onChange(updateDraftField(draft, "display_name", event.target.value))}
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
 
@@ -206,7 +206,7 @@ function ModelFormCard({
           <input
             value={draft.api_model_name}
             onChange={(event) => onChange(updateDraftField(draft, "api_model_name", event.target.value))}
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
 
@@ -217,7 +217,7 @@ function ModelFormCard({
           <input
             value={draft.api_key_env_var}
             onChange={(event) => onChange(updateDraftField(draft, "api_key_env_var", event.target.value))}
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
 
@@ -228,7 +228,7 @@ function ModelFormCard({
           <input
             value={draft.api_base_url}
             onChange={(event) => onChange(updateDraftField(draft, "api_base_url", event.target.value))}
-            className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+            className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
           />
         </label>
       </div>
@@ -267,7 +267,7 @@ function ModelFormCard({
           value={draft.notes}
           onChange={(event) => onChange(updateDraftField(draft, "notes", event.target.value))}
           rows={2}
-          className="w-full rounded-xl border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
+          className="w-full rounded-xl border border-black/10 bg-white/50 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.05]"
         />
       </label>
 
@@ -578,7 +578,7 @@ export function AdminModelsPage({
             return (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-2 rounded-xl border border-black/5 bg-white/60 px-3 py-2.5 transition hover:bg-white/80 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.05]"
+                className="flex items-center justify-between gap-2 rounded-xl border border-black/5 bg-white/60 px-3 py-2.5 transition hover:bg-white/50 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.05]"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
                   <div

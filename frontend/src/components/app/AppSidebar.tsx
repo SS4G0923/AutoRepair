@@ -96,7 +96,7 @@ export function AppSidebar({
     <aside
       className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden pr-1 ${!isDesktopLayout ? "shrink-0" : ""}`}
     >
-      <section className="shrink-0 rounded-[22px] border border-black/5 bg-white/72 p-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+      <section className="shrink-0 rounded-[22px] border border-black/5 bg-white/50 p-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
         <div className="px-2 text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
           {copy.sidebarWorkspace}
         </div>
@@ -105,7 +105,7 @@ export function AppSidebar({
             onClick={onStartNewAgentSession}
             className={`flex w-full items-center gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
               workspaceMode === "agent"
-                ? "bg-slate-900 text-white shadow-lg dark:bg-white dark:text-slate-950"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                 : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
             }`}
           >
@@ -130,7 +130,7 @@ export function AppSidebar({
             onClick={onStartNewChatSession}
             className={`flex w-full items-center gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
               workspaceMode === "chat"
-                ? "bg-slate-900 text-white shadow-lg dark:bg-white dark:text-slate-950"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                 : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
             }`}
           >
@@ -156,7 +156,7 @@ export function AppSidebar({
               onClick={onStartNewAdminSession}
               className={`flex w-full items-center gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
                 workspaceMode === "admin"
-                  ? "bg-slate-900 text-white shadow-lg dark:bg-white dark:text-slate-950"
+                  ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                   : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
               }`}
             >
@@ -180,7 +180,7 @@ export function AppSidebar({
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col rounded-[22px] border border-black/5 bg-white/72 p-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+      <section className="flex min-h-0 flex-1 flex-col rounded-[22px] border border-black/5 bg-white/50 p-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
         <div className="shrink-0 px-2 text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
           {workspaceMode === "admin" ? copy.adminNavTitle : copy.sidebarHistory}
         </div>
@@ -197,7 +197,7 @@ export function AppSidebar({
                     onClick={() => onSelectAdminPage(item.page)}
                     className={`flex w-full items-start gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
                       active
-                        ? "bg-slate-900 text-white shadow-lg dark:bg-white dark:text-slate-950"
+                        ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                         : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
                     }`}
                   >
@@ -241,7 +241,7 @@ export function AppSidebar({
                   key={item.id}
                   className={`flex items-start gap-2 rounded-[16px] px-2 py-2 transition ${
                     selectedHistoryId === item.id
-                      ? "bg-slate-900 text-white shadow-lg dark:bg-white dark:text-slate-950"
+                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                       : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
                   }`}
                 >

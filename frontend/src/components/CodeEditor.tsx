@@ -25,7 +25,7 @@ export function CodeEditor({ value, onChange, placeholder }: CodeEditorProps) {
   }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-ink-900/95 shadow-glow">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-ink-900/95">
       <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-5 py-3">
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-ember" />

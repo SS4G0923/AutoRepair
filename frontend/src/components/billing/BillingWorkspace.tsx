@@ -77,7 +77,7 @@ export function BillingWorkspace({
 
   return (
     <section
-      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 ${workspaceMainClass}`}
+      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 ${workspaceMainClass}`}
     >
       {/* ── header ── */}
       <div className="shrink-0 flex items-center justify-between gap-3">
@@ -152,7 +152,7 @@ export function BillingWorkspace({
                       onClick={() => setSelectedPlanCode(plan.plan_code)}
                       className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
                         active
-                          ? "border-indigo-500 bg-indigo-500 text-white shadow-md shadow-indigo-500/20 dark:border-indigo-400 dark:bg-indigo-500 dark:shadow-indigo-500/15"
+                          ? "border-indigo-500 bg-indigo-500 text-white dark:border-indigo-400 dark:bg-indigo-500"
                           : "border-black/5 bg-white/60 hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/80 dark:hover:border-indigo-400/30 dark:hover:bg-indigo-500/5"
                       }`}
                     >
@@ -191,7 +191,7 @@ export function BillingWorkspace({
                         onClick={() => setSelectedMethod(method.code)}
                         className={`rounded-xl border px-3 py-2.5 text-left transition ${
                           active
-                            ? "border-indigo-500 bg-indigo-500 text-white shadow-sm shadow-indigo-500/15 dark:border-indigo-400 dark:bg-indigo-500"
+                            ? "border-indigo-500 bg-indigo-500 text-white dark:border-indigo-400 dark:bg-indigo-500"
                             : "border-black/5 bg-white/60 hover:border-indigo-300 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/80 dark:hover:border-indigo-400/30"
                         }`}
                       >
@@ -206,7 +206,7 @@ export function BillingWorkspace({
                   disabled={!canCreateOrder}
                   className={`mt-1 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                     canCreateOrder
-                      ? "bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/30 dark:from-indigo-500 dark:to-violet-500"
+                      ? "bg-gradient-to-r from-indigo-500 to-violet-500 text-white dark:from-indigo-500 dark:to-violet-500"
                       : "cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-white/5 dark:text-white/25"
                   }`}
                 >

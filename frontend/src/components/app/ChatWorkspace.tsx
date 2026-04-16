@@ -34,7 +34,7 @@ export function ChatWorkspace({
 }: ChatWorkspaceProps) {
   return (
     <section
-      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 ${!isDesktopLayout ? "flex-1" : ""}`}
+      className={`flex min-h-0 min-w-0 h-full flex-col overflow-hidden rounded-[24px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 ${!isDesktopLayout ? "flex-1" : ""}`}
     >
       <div className="shrink-0 flex items-center justify-between gap-3">
         <div className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/40">
@@ -44,7 +44,7 @@ export function ChatWorkspace({
           value={model}
           onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
           disabled={modelOptions.length === 0}
-          className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+          className="rounded-full border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
         >
           {modelOptions.length > 0 ? (
             modelOptions.map((option) => (
@@ -110,7 +110,7 @@ export function ChatWorkspace({
         </div>
       </div>
 
-      <div className="mt-3 shrink-0 rounded-[20px] border border-black/5 bg-white/70 p-2.5 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="mt-3 shrink-0 rounded-[20px] border border-black/5 bg-white/50 p-2.5 dark:border-white/10 dark:bg-white/[0.03]">
         <textarea
           value={chatInput}
           onChange={(event) => onChatInputChange(event.target.value)}

@@ -76,7 +76,7 @@ export function AdminPaymentsPage({
               }))
             }
             placeholder={copy.adminSearchPlaceholder}
-            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+            className="rounded-xl border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
           />
           <select
             value={filters.status}
@@ -87,7 +87,7 @@ export function AdminPaymentsPage({
                 status: event.target.value,
               }))
             }
-            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.adminFilterStatus}: {copy.adminFilterAll}</option>
             <option value="pending">{copy.billingStatusPending}</option>
@@ -103,7 +103,7 @@ export function AdminPaymentsPage({
                 paymentMethod: event.target.value,
               }))
             }
-            className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="rounded-xl border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             <option value="">{copy.billingPaymentMethod}: {copy.adminFilterAll}</option>
             <option value="card">{copy.billingProviderCard}</option>

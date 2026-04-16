@@ -491,7 +491,7 @@ function App() {
 
         {sessionLoading ? (
           <div className="grid min-h-[82vh] place-items-center">
-            <div className="rounded-[32px] border border-black/5 bg-white/72 px-8 py-6 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+            <div className="rounded-[32px] border border-black/5 bg-white/50 px-8 py-6 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
               <div className="text-sm uppercase tracking-[0.28em] text-slate-500 dark:text-white/45">
                 {dict.authLoading}
               </div>

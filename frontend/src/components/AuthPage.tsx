@@ -110,7 +110,7 @@ export function AuthPage({
     <div className="mx-auto grid h-[calc(100vh-5.5rem)] max-w-[1400px] items-stretch gap-5 overflow-hidden px-4 py-4 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
       <AuthShowcase locale={locale} />
 
-      <section className="flex h-full flex-col overflow-hidden rounded-[36px] border border-black/5 bg-white/78 p-6 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 sm:p-7">
+      <section className="flex h-full flex-col overflow-hidden rounded-[36px] border border-black/5 bg-white/50 p-6 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 sm:p-7">
         <div className="grid grid-cols-2 gap-3 rounded-full border border-black/5 bg-black/[0.03] p-1 dark:border-white/10 dark:bg-white/[0.03]">
           <button
             onClick={() => setMode("login")}
@@ -201,14 +201,14 @@ export function AuthPage({
         <div className="mt-5 grid gap-3">
           <button
             onClick={() => handleOAuth("github")}
-            className="flex items-center justify-center gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+            className="flex items-center justify-center gap-3 rounded-2xl border border-black/10 bg-white/50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
           >
             <GitHubLogo />
             {copy.continueGithub}
           </button>
           <button
             onClick={() => handleOAuth("google")}
-            className="flex items-center justify-center gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+            className="flex items-center justify-center gap-3 rounded-2xl border border-black/10 bg-white/50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
           >
             <GoogleLogo />
             {copy.continueGoogle}
