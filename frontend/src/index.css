@@ -53,3 +53,35 @@ pre::-webkit-scrollbar-track,
 div::-webkit-scrollbar-track {
   background: transparent;
 }
+
+@keyframes chat-thinking-glint {
+  0% {
+    transform: translateX(0) skewX(-18deg);
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 0;
+  }
+
+  42% {
+    opacity: 1;
+  }
+
+  72% {
+    opacity: 0.35;
+  }
+
+  100% {
+    transform: translateX(430%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+.chat-thinking-bubble {
+  isolation: isolate;
+}
+
+.chat-thinking-glint {
+  animation: chat-thinking-glint 1.8s ease-in-out infinite;
+}

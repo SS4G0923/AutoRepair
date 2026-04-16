@@ -89,8 +89,9 @@ export function ChatWorkspace({
           )}
 
           {chatThinking && !chatStreamingText ? (
-            <div className="max-w-[85%] rounded-[24px] bg-white/85 px-4 py-3 text-slate-700 dark:bg-slate-900/90 dark:text-white">
-              <div className="text-sm">{copy.chatThinking}</div>
+            <div className="chat-thinking-bubble relative max-w-[85%] overflow-hidden rounded-[24px] bg-white/85 px-4 py-3 text-slate-700 dark:bg-slate-900/90 dark:text-white">
+              <div className="chat-thinking-glint pointer-events-none absolute inset-y-0 left-[-40%] w-[38%] bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/20" />
+              <div className="relative text-sm">{copy.chatThinking}</div>
             </div>
           ) : null}
 
