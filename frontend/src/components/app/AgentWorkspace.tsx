@@ -1,5 +1,6 @@
 import { CodeEditor } from "../CodeEditor";
 import { StageCard } from "../StageCard";
+import { Dropdown } from "../Dropdown";
 import { AppCopy, languageOptions, stageOrder } from "../../i18n";
 import type {
   AgentSourceType,
@@ -103,14 +104,49 @@ export function AgentWorkspace({
   onStop,
   onZipSelected,
 }: AgentWorkspaceProps) {
+  const hasVisibleText = (value?: string | null) => Boolean(value && value.trim().length > 0);
+
+  const runOutputSections: Array<{ key: string; label: string; content: string }> = [];
+
+  if (runResult) {
+    if (hasVisibleText(runResult.input_text)) {
+      runOutputSections.push({
+        key: "stdin",
+        label: copy.stdin,
+        content: runResult.input_text!,
+      });
+    }
+    if (hasVisibleText(runResult.stdout)) {
+      runOutputSections.push({
+        key: "stdout",
+        label: copy.stdout,
+        content: runResult.stdout,
+      });
+    }
+    if (hasVisibleText(runResult.stderr)) {
+      runOutputSections.push({
+        key: "stderr",
+        label: copy.stderr,
+        content: runResult.stderr,
+      });
+    }
+  }
+
+  const runOutputGridClassName =
+    runOutputSections.length <= 1
+      ? "mt-4 grid gap-4"
+      : runOutputSections.length === 2
+        ? "mt-4 grid gap-4 md:grid-cols-2"
+        : "mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3";
+
   return (
     <div className={workspaceMainClass}>
       <div className="grid h-full min-h-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <section className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pr-1">
           <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
             <div className="shrink-0 flex flex-col gap-4">
-              <div className={`flex gap-3 ${agentSourceType === "single_file" ? "items-start" : "items-center"}`}>
-                <div className="flex items-center gap-1.5 rounded-full border border-black/5 bg-black/[0.03] p-1 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-black/5 bg-black/[0.03] p-1 dark:border-white/10 dark:bg-white/[0.03]">
                   {(
                     [
                       ["single_file", copy.sourceSingle],
@@ -132,40 +168,30 @@ export function AgentWorkspace({
                   ))}
                 </div>
 
-                <div className="flex min-w-[180px] flex-col gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   {agentSourceType === "single_file" ? (
-                    <select
+                    <Dropdown
                       value={language}
-                      onChange={(event) => onLanguageChange(event.target.value as CodeLanguage)}
-                      className="rounded-full border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-                    >
-                      {languageOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                      options={languageOptions}
+                      onChange={(val) => onLanguageChange(val as CodeLanguage)}
+                      className="min-w-0"
+                    />
                   ) : (
-                    <div className="rounded-full border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white">
-                      {copy.detectedLanguage}: {languageOptions.find((option) => option.value === language)?.label ?? language}
+                    <div className="min-w-0 truncate rounded-full border border-black/10 bg-white/50 px-3 py-1.5 text-sm text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                      {languageOptions.find((option) => option.value === language)?.label ?? language}
                     </div>
                   )}
-                  <select
+                  <Dropdown
                     value={model}
-                    onChange={(event) => onModelChange(event.target.value as ModelOptionValue)}
+                    options={modelOptions}
+                    onChange={(val) => onModelChange(val as ModelOptionValue)}
                     disabled={modelOptions.length === 0}
-                    className="rounded-full border border-black/10 bg-white/50 px-3 py-2 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white"
-                  >
-                    {modelOptions.length > 0 ? (
-                      modelOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {copy.model}: {option.label}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="">{copy.modelEmpty}</option>
-                    )}
-                  </select>
+                    placeholder={modelOptions.length === 0 ? copy.modelEmpty : undefined}
+                    className="w-[clamp(8rem,12vw,9rem)] min-w-0"
+                    menuClassName="max-w-[min(14rem,calc(100vw-2rem))]"
+                    triggerLabelClassName="min-w-0 flex-1 whitespace-nowrap"
+                    optionLabelClassName="whitespace-nowrap"
+                  />
                 </div>
               </div>
 
@@ -409,32 +435,18 @@ export function AgentWorkspace({
                 </div>
               </div>
 
-              {runResult ? (
-                <div className="mt-4 grid gap-4 md:grid-cols-3">
-                  <div>
-                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/80">
-                      {copy.stdin}
+              {runOutputSections.length > 0 ? (
+                <div className={runOutputGridClassName}>
+                  {runOutputSections.map((section) => (
+                    <div key={section.key}>
+                      <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/80">
+                        {section.label}
+                      </div>
+                      <pre className="min-h-[120px] whitespace-pre-wrap break-words rounded-3xl bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:bg-slate-950/95 dark:text-white">
+                        {section.content}
+                      </pre>
                     </div>
-                    <pre className="min-h-[120px] whitespace-pre-wrap break-words rounded-3xl bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:bg-slate-950/95 dark:text-white">
-                      {runResult.input_text || "∅"}
-                    </pre>
-                  </div>
-                  <div>
-                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/80">
-                      {copy.stdout}
-                    </div>
-                    <pre className="min-h-[120px] whitespace-pre-wrap break-words rounded-3xl bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:bg-slate-950/95 dark:text-white">
-                      {runResult.stdout || "∅"}
-                    </pre>
-                  </div>
-                  <div>
-                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/80">
-                      {copy.stderr}
-                    </div>
-                    <pre className="min-h-[120px] whitespace-pre-wrap break-words rounded-3xl bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:bg-slate-950/95 dark:text-white">
-                      {runResult.stderr || "∅"}
-                    </pre>
-                  </div>
+                  ))}
                 </div>
               ) : null}
 

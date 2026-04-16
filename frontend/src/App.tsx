@@ -537,6 +537,7 @@ function App() {
                 historyItems={historyItems}
                 historyLoading={historyLoading}
                 isDesktopLayout={isDesktopLayout}
+                locale={locale}
                 selectedHistoryId={selectedHistoryId}
                 workspaceMode={workspaceMode}
                 onDeleteHistory={(historyId) => {

@@ -1,5 +1,5 @@
 import type { AppCopy } from "../../i18n";
-import type { AdminPage, HistorySummary, WorkspaceMode } from "../../types";
+import type { AdminPage, HistorySummary, WorkspaceMode, UiLocale } from "../../types";
 import {
   ActivityIcon,
   AdminIcon,
@@ -13,6 +13,40 @@ import {
   UsersIcon,
 } from "./AppIcons";
 
+function formatRelativeTime(dateString: string, locale: UiLocale): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffInSeconds = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 1000));
+
+  const rtf = new Intl.RelativeTimeFormat(locale === "zh" ? "zh-CN" : "en-US", { numeric: "auto" });
+
+  if (diffInSeconds < 60) {
+    return rtf.format(-diffInSeconds || 0, "second");
+  }
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) {
+    return rtf.format(-diffInMinutes, "minute");
+  }
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) {
+    return rtf.format(-diffInHours, "hour");
+  }
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays < 7) {
+    return rtf.format(-diffInDays, "day");
+  }
+  const diffInWeeks = Math.floor(diffInDays / 7);
+  if (diffInWeeks < 4) {
+    return rtf.format(-diffInWeeks, "week");
+  }
+  const diffInMonths = Math.floor(diffInDays / 30);
+  if (diffInMonths < 12) {
+    return rtf.format(-diffInMonths, "month");
+  }
+  const diffInYears = Math.floor(diffInDays / 365);
+  return rtf.format(-diffInYears, "year");
+}
+
 interface AppSidebarProps {
   adminPage: AdminPage;
   canAccessAdmin: boolean;
@@ -21,6 +55,7 @@ interface AppSidebarProps {
   historyItems: HistorySummary[];
   historyLoading: boolean;
   isDesktopLayout: boolean;
+  locale: UiLocale;
   selectedHistoryId: number | null;
   workspaceMode: WorkspaceMode;
   onDeleteHistory: (historyId: number) => void;
@@ -39,6 +74,7 @@ export function AppSidebar({
   historyItems,
   historyLoading,
   isDesktopLayout,
+  locale,
   selectedHistoryId,
   workspaceMode,
   onDeleteHistory,
@@ -255,22 +291,15 @@ export function AppSidebar({
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{item.title}</div>
                       <div
-                        className={`mt-1 line-clamp-2 text-xs ${
-                          selectedHistoryId === item.id
-                            ? "text-white/70 dark:text-slate-950/70"
-                            : "text-slate-500 dark:text-white/40"
-                        }`}
-                      >
-                        {item.preview_text}
-                      </div>
-                      <div
-                        className={`mt-2 text-[11px] uppercase tracking-[0.18em] ${
+                        className={`mt-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.05em] ${
                           selectedHistoryId === item.id
                             ? "text-white/60 dark:text-slate-950/60"
-                            : "text-slate-400 dark:text-white/28"
+                            : "text-slate-400 dark:text-white/40"
                         }`}
                       >
-                        {item.model ?? ""} {item.updated_at}
+                        {item.model ? <span className="truncate">{item.model}</span> : null}
+                        {item.model ? <span className="opacity-50">•</span> : null}
+                        <span className="shrink-0">{formatRelativeTime(item.updated_at, locale)}</span>
                       </div>
                     </div>
                   </button>
