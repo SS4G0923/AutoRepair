@@ -32,6 +32,7 @@ interface AgentWorkspaceProps {
   locale: UiLocale;
   model: ModelOptionValue;
   modelOptions: ModelCatalogItem[];
+  projectActionLoading: boolean;
   projectSubdir: string;
   projectEntrypointOptions: ProjectEntrypointOption[];
   projectFilesLoading: boolean;
@@ -77,6 +78,7 @@ export function AgentWorkspace({
   locale,
   model,
   modelOptions,
+  projectActionLoading,
   projectSubdir,
   projectEntrypointOptions,
   projectFilesLoading,
@@ -105,6 +107,10 @@ export function AgentWorkspace({
   onZipSelected,
 }: AgentWorkspaceProps) {
   const hasVisibleText = (value?: string | null) => Boolean(value && value.trim().length > 0);
+  const isProjectMode = agentSourceType !== "single_file";
+  const projectEditorTitle = entrypointPath.trim() || copy.entrypoint;
+  const projectApplyPrompt = agentSourceType === "zip" ? copy.applyProjectZipPrompt : copy.applyProjectGithubPrompt;
+  const projectApplyLabel = agentSourceType === "zip" ? copy.applyZipAccept : copy.applyGithubAccept;
 
   const runOutputSections: Array<{ key: string; label: string; content: string }> = [];
 
@@ -308,17 +314,6 @@ export function AgentWorkspace({
                       )}
                     </select>
                   </label>
-                  <label className="block">
-                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-                      {copy.projectSubdir}
-                    </div>
-                    <input
-                      value={projectSubdir}
-                      onChange={(event) => onProjectSubdirChange(event.target.value)}
-                      placeholder="packages/api"
-                      className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
-                    />
-                  </label>
                 </div>
               ) : null}
 
@@ -343,49 +338,16 @@ export function AgentWorkspace({
             ) : null}
 
             <div className="mt-3 min-h-0 flex flex-1 flex-col">
-              {agentSourceType === "single_file" ? (
+              {!isProjectMode ? (
                 <CodeEditor value={code} onChange={onCodeChange} placeholder={copy.placeholder} />
               ) : (
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[28px] border border-black/5 bg-black/[0.03] p-5 dark:border-white/10 dark:bg-white/[0.03]">
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70">
-                      <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-                        {copy.entrypoint}
-                      </div>
-                      <div className="mt-2 font-mono text-sm text-slate-800 dark:text-white">
-                        {entrypointPath.trim() || (projectFilesLoading ? copy.projectFilesLoading : copy.projectFilesEmpty)}
-                      </div>
-                    </div>
-                    <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70">
-                      <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-                        {copy.projectSubdir}
-                      </div>
-                      <div className="mt-2 font-mono text-sm text-slate-800 dark:text-white">
-                        {projectSubdir.trim() || "∅"}
-                      </div>
-                    </div>
-                    <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
-                      <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-                        {agentSourceType === "zip" ? copy.zipUpload : copy.githubRepoUrl}
-                      </div>
-                      <div className="mt-2 whitespace-pre-wrap break-words font-mono text-sm text-slate-800 dark:text-white">
-                        {agentSourceType === "zip"
-                          ? zipFileName || copy.zipRequired
-                          : githubRepoUrl.trim() || copy.githubRepoRequired}
-                      </div>
-                    </div>
-                    {agentSourceType === "github" ? (
-                      <div className="rounded-[22px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-slate-950/70 lg:col-span-2">
-                        <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-                          {copy.githubRef}
-                        </div>
-                        <div className="mt-2 font-mono text-sm text-slate-800 dark:text-white">
-                          {githubRef.trim() || "default"}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
+                <CodeEditor
+                  value={code}
+                  onChange={onCodeChange}
+                  placeholder={projectFilesLoading ? copy.projectFilesLoading : copy.projectFilesEmpty}
+                  readOnly
+                  title={projectEditorTitle}
+                />
               )}
             </div>
 
@@ -471,11 +433,13 @@ export function AgentWorkspace({
                     {finalDiff}
                   </pre>
 
-                  {verificationPassed && agentSourceType === "single_file" ? (
+                  {verificationPassed && !isProjectMode ? (
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <div className="text-sm text-slate-600 dark:text-white/70">{copy.applyPrompt}</div>
                       <button
-                        onClick={onApplyDiff}
+                        onClick={() => {
+                          void onApplyDiff();
+                        }}
                         disabled={diffApplied}
                         className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
                       >
@@ -490,9 +454,25 @@ export function AgentWorkspace({
                     </div>
                   ) : null}
 
-                  {verificationPassed && agentSourceType !== "single_file" ? (
-                    <div className="mt-4 rounded-3xl border border-black/10 bg-black/[0.03] px-4 py-3 text-sm text-slate-700 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/75">
-                      {copy.applyProjectOnly}
+                  {verificationPassed && isProjectMode ? (
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <div className="text-sm text-slate-600 dark:text-white/70">{projectApplyPrompt}</div>
+                      <button
+                        onClick={() => {
+                          void onApplyDiff();
+                        }}
+                        disabled={diffApplied || projectActionLoading}
+                        className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-white/85"
+                      >
+                        {projectActionLoading ? copy.applyProjectActionRunning : projectApplyLabel}
+                      </button>
+                      <button
+                        onClick={onSkipDiff}
+                        disabled={projectActionLoading}
+                        className="rounded-full border border-black/10 bg-white/50 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/75"
+                      >
+                        {copy.applyDecline}
+                      </button>
                     </div>
                   ) : null}
 

@@ -653,6 +653,7 @@ function App() {
                   locale={locale}
                   model={agentModel}
                   modelOptions={availableModels}
+                  projectActionLoading={repair.projectActionLoading}
                   projectSubdir={repair.projectSubdir}
                   projectEntrypointOptions={repair.projectEntrypointOptions}
                   projectFilesLoading={repair.projectFilesLoading}

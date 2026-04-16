@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import queue
 import secrets
+import subprocess
 import threading
+import zipfile
 from datetime import datetime, timezone
 from functools import wraps
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 from flask import Flask, Response, jsonify, redirect, request, session, stream_with_context, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -54,8 +58,13 @@ from backend.llm.store import (
     list_public_model_catalog,
     update_model_config,
 )
-from backend.repair.pipeline import RepairRequest, run_repair_pipeline
-from backend.repair.workspace import list_project_entrypoint_options
+from backend.repair.languages import get_language_spec, normalize_language
+from backend.repair.pipeline import RepairRequest, _apply_unified_diff_to_project, run_repair_pipeline
+from backend.repair.workspace import (
+    list_project_entrypoint_options,
+    normalize_project_path,
+    prepare_project_workspace,
+)
 
 try:
     from dotenv import load_dotenv
@@ -89,6 +98,7 @@ def _preferred_frontend_origin(allowed_origins: set[str]) -> str:
 
 ALLOWED_ORIGINS = _parse_allowed_origins()
 PREFERRED_FRONTEND_ORIGIN = _preferred_frontend_origin(ALLOWED_ORIGINS)
+GITHUB_TOKEN_SESSION_KEY = "github_oauth_token"
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", secrets.token_hex(32))
@@ -110,7 +120,7 @@ if oauth is not None:
             access_token_url="https://github.com/login/oauth/access_token",
             authorize_url="https://github.com/login/oauth/authorize",
             api_base_url="https://api.github.com/",
-            client_kwargs={"scope": "read:user user:email"},
+            client_kwargs={"scope": "read:user user:email repo"},
         )
 
     google_client_id = os.getenv("GOOGLE_CLIENT_ID")
@@ -163,6 +173,30 @@ def _current_user() -> dict[str, Any] | None:
 def _set_user_session(user: dict[str, Any]) -> None:
     session.clear()
     session["user_id"] = user["id"]
+
+
+def _store_oauth_token(provider: str, token: dict[str, Any]) -> None:
+    access_token = str(token.get("access_token") or "").strip()
+    session_key = f"{provider}_oauth_token"
+    if not access_token:
+        session.pop(session_key, None)
+        return
+    session[session_key] = {
+        "access_token": access_token,
+        "token_type": str(token.get("token_type") or "").strip() or None,
+        "scope": str(token.get("scope") or "").strip() or None,
+    }
+
+
+def _github_access_token_from_session() -> str | None:
+    raw_token = session.get(GITHUB_TOKEN_SESSION_KEY)
+    if isinstance(raw_token, dict):
+        value = str(raw_token.get("access_token") or "").strip()
+        return value or None
+    if isinstance(raw_token, str):
+        value = raw_token.strip()
+        return value or None
+    return None
 
 
 def _request_ip() -> str | None:
@@ -444,8 +478,8 @@ def _get_oauth_client(provider: str):
     return oauth.create_client(provider)
 
 
-def _github_email(client) -> str | None:
-    emails_response = client.get("user/emails")
+def _github_email(client, token: dict[str, Any]) -> str | None:
+    emails_response = client.get("user/emails", token=token)
     emails_payload = emails_response.json()
     if not isinstance(emails_payload, list):
         return None
@@ -466,20 +500,22 @@ def _github_email(client) -> str | None:
     return fallback
 
 
-def _oauth_user_payload(provider: str, client) -> tuple[str, str, str, str | None]:
+def _oauth_user_payload(provider: str, client) -> tuple[dict[str, Any], str, str, str, str | None]:
     token = client.authorize_access_token()
+    if not isinstance(token, dict):
+        raise ValueError("OAuth provider did not return a usable token.")
     if provider == "google":
         user_info = token.get("userinfo")
         if not isinstance(user_info, dict):
-            user_info = client.get("userinfo").json()
+            user_info = client.get("userinfo", token=token).json()
         provider_user_id = str(user_info.get("sub", "")).strip()
         email = str(user_info.get("email", "")).strip()
         display_name = str(user_info.get("name") or email.split("@", 1)[0]).strip()
         avatar_url = user_info.get("picture")
     elif provider == "github":
-        profile = client.get("user").json()
+        profile = client.get("user", token=token).json()
         provider_user_id = str(profile.get("id", "")).strip()
-        email = str(profile.get("email") or _github_email(client) or "").strip()
+        email = str(profile.get("email") or _github_email(client, token) or "").strip()
         display_name = str(profile.get("name") or profile.get("login") or email.split("@", 1)[0]).strip()
         avatar_url = profile.get("avatar_url")
     else:
@@ -487,7 +523,7 @@ def _oauth_user_payload(provider: str, client) -> tuple[str, str, str, str | Non
 
     if not provider_user_id or not email:
         raise ValueError("OAuth provider did not return a usable email.")
-    return provider_user_id, email, display_name, avatar_url
+    return token, provider_user_id, email, display_name, avatar_url
 
 
 @app.get("/healthz")
@@ -637,7 +673,7 @@ def oauth_callback(provider: str) -> Response:
         return redirect(_frontend_redirect_url(auth_error="provider_unavailable"))
 
     try:
-        provider_user_id, email, display_name, avatar_url = _oauth_user_payload(provider, client)
+        token, provider_user_id, email, display_name, avatar_url = _oauth_user_payload(provider, client)
         user = upsert_oauth_user(
             provider=provider,
             provider_user_id=provider_user_id,
@@ -657,6 +693,8 @@ def oauth_callback(provider: str) -> Response:
             )
             return redirect(_frontend_redirect_url(auth_error="account_suspended"))
         _finalize_login(user, login_method=provider, email_attempt=email)
+        if provider == "github":
+            _store_oauth_token(provider, token)
     except Exception:
         record_login_event(
             user_id=None,
@@ -959,6 +997,186 @@ def _payment_provider_placeholder_response(provider: str) -> Response:
     )
 
 
+def _validate_project_source_payload(payload: dict[str, Any]) -> dict[str, str | None]:
+    project_zip_base64 = payload.get("project_zip_base64")
+    github_repo_url = payload.get("github_repo_url")
+    github_ref = payload.get("github_ref")
+    project_subdir = payload.get("project_subdir")
+    preview_path = payload.get("preview_path")
+
+    if project_zip_base64 is not None and (
+        not isinstance(project_zip_base64, str) or not project_zip_base64.strip()
+    ):
+        raise ValueError("`project_zip_base64` must be a non-empty base64 string when provided.")
+    if github_repo_url is not None and (
+        not isinstance(github_repo_url, str) or not github_repo_url.strip()
+    ):
+        raise ValueError("`github_repo_url` must be a non-empty string when provided.")
+    if github_ref is not None and not isinstance(github_ref, str):
+        raise ValueError("`github_ref` must be a string when provided.")
+    if project_subdir is not None and (
+        not isinstance(project_subdir, str) or not project_subdir.strip()
+    ):
+        raise ValueError("`project_subdir` must be a non-empty string when provided.")
+    if preview_path is not None and (
+        not isinstance(preview_path, str) or not preview_path.strip()
+    ):
+        raise ValueError("`preview_path` must be a non-empty string when provided.")
+
+    source_count = sum(
+        1
+        for present in (bool(project_zip_base64), bool(github_repo_url))
+        if present
+    )
+    if source_count != 1:
+        raise ValueError("Exactly one of `project_zip_base64` or `github_repo_url` must be provided.")
+
+    return {
+        "project_zip_base64": project_zip_base64.strip() if isinstance(project_zip_base64, str) else None,
+        "github_repo_url": github_repo_url.strip() if isinstance(github_repo_url, str) else None,
+        "github_ref": github_ref.strip() if isinstance(github_ref, str) and github_ref.strip() else None,
+        "project_subdir": normalize_project_path(project_subdir) if isinstance(project_subdir, str) else None,
+        "preview_path": normalize_project_path(preview_path) if isinstance(preview_path, str) else None,
+    }
+
+
+def _validate_project_patch_payload(payload: dict[str, Any]) -> dict[str, str | None]:
+    source_payload = _validate_project_source_payload(payload)
+    language = normalize_language(payload.get("language", "python"))
+    language_spec = get_language_spec(language)
+
+    raw_filename = payload.get("filename")
+    if not isinstance(raw_filename, str) or not raw_filename.strip():
+        raise ValueError("`filename` must be a non-empty string.")
+    filename = normalize_project_path(
+        raw_filename,
+        required_suffixes=language_spec.source_extensions,
+    )
+
+    raw_git_diff = payload.get("git_diff")
+    if not isinstance(raw_git_diff, str) or not raw_git_diff.strip():
+        raise ValueError("`git_diff` must be a non-empty string.")
+
+    raw_zip_filename = payload.get("zip_filename")
+    if raw_zip_filename is not None and not isinstance(raw_zip_filename, str):
+        raise ValueError("`zip_filename` must be a string when provided.")
+
+    raw_commit_message = payload.get("commit_message")
+    if raw_commit_message is not None and not isinstance(raw_commit_message, str):
+        raise ValueError("`commit_message` must be a string when provided.")
+
+    return {
+        **source_payload,
+        "language": language,
+        "filename": filename,
+        "git_diff": raw_git_diff,
+        "zip_filename": raw_zip_filename.strip() if isinstance(raw_zip_filename, str) and raw_zip_filename.strip() else None,
+        "commit_message": (
+            raw_commit_message.strip()
+            if isinstance(raw_commit_message, str) and raw_commit_message.strip()
+            else None
+        ),
+    }
+
+
+def _project_file_target(project_root: Path, relative_path: str) -> Path:
+    normalized = normalize_project_path(relative_path)
+    target = (project_root / normalized).resolve()
+    resolved_root = project_root.resolve()
+    if resolved_root not in target.parents and target != resolved_root:
+        raise ValueError("Path escapes the prepared project root.")
+    return target
+
+
+def _write_patched_project_files(
+    project_root: Path,
+    *,
+    original_files: dict[str, str],
+    patched_files: dict[str, str],
+) -> None:
+    for relative_path in original_files:
+        if relative_path in patched_files:
+            continue
+        target = _project_file_target(project_root, relative_path)
+        if target.exists():
+            target.unlink()
+
+    for relative_path, content in patched_files.items():
+        target = _project_file_target(project_root, relative_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def _archive_directory(root_dir: Path) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(root_dir.rglob("*")):
+            if path.is_file():
+                archive.write(path, arcname=path.relative_to(root_dir).as_posix())
+    return buffer.getvalue()
+
+
+def _build_patched_zip_name(raw_filename: str | None) -> str:
+    cleaned = Path(raw_filename or "project.zip").name.strip() or "project.zip"
+    stem = cleaned[:-4] if cleaned.lower().endswith(".zip") else cleaned
+    stem = stem or "project"
+    return f"{stem}-patched.zip"
+
+
+def _default_project_commit_message(filename: str) -> str:
+    return f"Apply AutoRepair patch for {Path(filename).name}"
+
+
+def _github_push_url(repo_url: str, access_token: str) -> str:
+    if repo_url.startswith("git@github.com:"):
+        repo_path = repo_url.split(":", 1)[1].strip()
+    else:
+        parsed = urlparse(repo_url)
+        host = parsed.netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if host != "github.com":
+            raise ValueError("`github_repo_url` must point to github.com.")
+        repo_path = parsed.path.lstrip("/").strip()
+    repo_path = repo_path.rstrip("/")
+    if repo_path.endswith(".git"):
+        repo_path = repo_path[:-4]
+    if repo_path.count("/") < 1:
+        raise ValueError("`github_repo_url` must include the owner and repository name.")
+    return f"https://x-access-token:{quote(access_token, safe='')}@github.com/{repo_path}.git"
+
+
+def _run_git(
+    args: list[str],
+    *,
+    cwd: Path,
+    extra_env: dict[str, str] | None = None,
+    timeout_sec: int = 60,
+) -> str:
+    env = os.environ.copy()
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    if extra_env:
+        env.update(extra_env)
+    verb = args[0] if args else "command"
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout_sec,
+            env=env,
+        )
+    except subprocess.CalledProcessError as exc:
+        message = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+        raise RuntimeError(f"Git {verb} failed: {message}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Git {verb} failed: {exc}") from exc
+    return completed.stdout.strip()
+
+
 @app.route("/api/billing/providers/stripe/webhook", methods=["POST", "OPTIONS"])
 def billing_stripe_webhook() -> Response:
     if request.method == "OPTIONS":
@@ -1034,6 +1252,8 @@ def repair_stream() -> Response:
         elif event == "run_result":
             if outgoing.get("entrypoint"):
                 captured["filename"] = str(outgoing.get("entrypoint"))
+            if isinstance(outgoing.get("entrypoint_code"), str):
+                captured["code"] = str(outgoing.get("entrypoint_code"))
             captured["run_result"] = {
                 "stdout": outgoing.get("stdout", ""),
                 "stderr": outgoing.get("stderr", ""),
@@ -1175,45 +1395,152 @@ def repair_project_files() -> Response:
     if not isinstance(payload, dict):
         return jsonify({"error": "Request body must be a JSON object."}), 400
 
-    project_zip_base64 = payload.get("project_zip_base64")
-    github_repo_url = payload.get("github_repo_url")
-    github_ref = payload.get("github_ref")
-    project_subdir = payload.get("project_subdir")
-
-    if project_zip_base64 is not None and (
-        not isinstance(project_zip_base64, str) or not project_zip_base64.strip()
-    ):
-        return jsonify({"error": "`project_zip_base64` must be a non-empty base64 string when provided."}), 400
-    if github_repo_url is not None and (
-        not isinstance(github_repo_url, str) or not github_repo_url.strip()
-    ):
-        return jsonify({"error": "`github_repo_url` must be a non-empty string when provided."}), 400
-    if github_ref is not None and not isinstance(github_ref, str):
-        return jsonify({"error": "`github_ref` must be a string when provided."}), 400
-    if project_subdir is not None and (
-        not isinstance(project_subdir, str) or not project_subdir.strip()
-    ):
-        return jsonify({"error": "`project_subdir` must be a non-empty string when provided."}), 400
-
-    source_count = sum(
-        1
-        for present in (bool(project_zip_base64), bool(github_repo_url))
-        if present
-    )
-    if source_count != 1:
-        return jsonify({"error": "Exactly one of `project_zip_base64` or `github_repo_url` must be provided."}), 400
-
     try:
+        source_payload = _validate_project_source_payload(payload)
         result = list_project_entrypoint_options(
-            project_zip_base64=project_zip_base64.strip() if isinstance(project_zip_base64, str) else None,
-            github_repo_url=github_repo_url.strip() if isinstance(github_repo_url, str) else None,
-            github_ref=github_ref.strip() if isinstance(github_ref, str) and github_ref.strip() else None,
-            project_subdir=project_subdir.strip() if isinstance(project_subdir, str) else None,
+            project_zip_base64=source_payload["project_zip_base64"],
+            github_repo_url=source_payload["github_repo_url"],
+            github_ref=source_payload["github_ref"],
+            project_subdir=source_payload["project_subdir"],
+            preview_path=source_payload["preview_path"],
         )
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
     return jsonify(result)
+
+
+@app.route("/api/repair/project-download", methods=["POST", "OPTIONS"])
+@_require_login
+def repair_project_download() -> Response:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+
+    try:
+        request_payload = _validate_project_patch_payload(payload)
+        if not request_payload["project_zip_base64"]:
+            raise ValueError("`project_zip_base64` is required for ZIP download.")
+        with prepare_project_workspace(
+            code=None,
+            filename=request_payload["filename"],
+            language=str(request_payload["language"]),
+            project_files=(),
+            project_zip_base64=request_payload["project_zip_base64"],
+            github_repo_url=None,
+            github_ref=None,
+            project_subdir=request_payload["project_subdir"],
+        ) as workspace:
+            patched_files = _apply_unified_diff_to_project(
+                workspace.file_map,
+                str(request_payload["git_diff"]),
+                default_path=workspace.entrypoint,
+            )
+            _write_patched_project_files(
+                workspace.root_dir,
+                original_files=workspace.file_map,
+                patched_files=patched_files,
+            )
+            archive_bytes = _archive_directory(workspace.source_root)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    response = Response(archive_bytes, mimetype="application/zip")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{_build_patched_zip_name(request_payload["zip_filename"])}"'
+    )
+    return response
+
+
+@app.route("/api/repair/project-push", methods=["POST", "OPTIONS"])
+@_require_login
+def repair_project_push() -> Response:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+
+    access_token = _github_access_token_from_session()
+    if not access_token:
+        return jsonify({"error": "GitHub 推送需要使用 GitHub 登录并重新授权仓库权限。"}), 403
+
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    try:
+        request_payload = _validate_project_patch_payload(payload)
+        if not request_payload["github_repo_url"]:
+            raise ValueError("`github_repo_url` is required for GitHub push.")
+        with prepare_project_workspace(
+            code=None,
+            filename=request_payload["filename"],
+            language=str(request_payload["language"]),
+            project_files=(),
+            project_zip_base64=None,
+            github_repo_url=request_payload["github_repo_url"],
+            github_ref=request_payload["github_ref"],
+            project_subdir=request_payload["project_subdir"],
+        ) as workspace:
+            patched_files = _apply_unified_diff_to_project(
+                workspace.file_map,
+                str(request_payload["git_diff"]),
+                default_path=workspace.entrypoint,
+            )
+            _write_patched_project_files(
+                workspace.root_dir,
+                original_files=workspace.file_map,
+                patched_files=patched_files,
+            )
+            branch_name = _run_git(["branch", "--show-current"], cwd=workspace.source_root)
+            if not branch_name:
+                raise RuntimeError("GitHub 推送仅支持分支工作区，不支持 tag 或 detached HEAD。")
+
+            status_output = _run_git(["status", "--porcelain"], cwd=workspace.source_root)
+            if not status_output:
+                return jsonify(
+                    {
+                        "ok": True,
+                        "branch": branch_name,
+                        "message": f"仓库分支 {branch_name} 已经包含这份补丁，没有新的改动需要推送。",
+                    }
+                )
+
+            author_name = str(user.get("display_name") or "AutoRepair").strip() or "AutoRepair"
+            author_email = str(user.get("email") or "autorepair@local.invalid").strip() or "autorepair@local.invalid"
+            commit_env = {
+                "GIT_AUTHOR_NAME": author_name,
+                "GIT_AUTHOR_EMAIL": author_email,
+                "GIT_COMMITTER_NAME": author_name,
+                "GIT_COMMITTER_EMAIL": author_email,
+            }
+            commit_message = (
+                str(request_payload["commit_message"])
+                if request_payload["commit_message"]
+                else _default_project_commit_message(str(request_payload["filename"]))
+            )
+
+            _run_git(["add", "--all"], cwd=workspace.source_root)
+            _run_git(["commit", "-m", commit_message], cwd=workspace.source_root, extra_env=commit_env)
+            commit_sha = _run_git(["rev-parse", "HEAD"], cwd=workspace.source_root)
+            _run_git(
+                [
+                    "push",
+                    _github_push_url(str(request_payload["github_repo_url"]), access_token),
+                    f"HEAD:{branch_name}",
+                ],
+                cwd=workspace.source_root,
+            )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(
+        {
+            "ok": True,
+            "branch": branch_name,
+            "commit_sha": commit_sha,
+            "message": f"已将修复后的提交推送到 GitHub 分支 {branch_name}。",
+        }
+    )
 
 
 @app.route("/api/chat/stream", methods=["POST", "OPTIONS"])

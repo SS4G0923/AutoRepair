@@ -4,9 +4,11 @@ interface CodeEditorProps {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  readOnly?: boolean;
+  title?: string;
 }
 
-export function CodeEditor({ value, onChange, placeholder }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, placeholder, readOnly = false, title = "editor" }: CodeEditorProps) {
   const lineCount = Math.max(value.split("\n").length, 12);
   const gutterRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -32,7 +34,7 @@ export function CodeEditor({ value, onChange, placeholder }: CodeEditorProps) {
           <span className="h-3 w-3 rounded-full bg-amber-300" />
           <span className="h-3 w-3 rounded-full bg-aurora" />
         </div>
-        <div className="font-mono text-xs uppercase tracking-[0.28em] text-white/55">editor</div>
+        <div className="truncate font-mono text-xs text-white/55">{title}</div>
       </div>
       <div className="flex min-h-0 flex-1 bg-[radial-gradient(circle_at_top,_rgba(109,211,206,0.12),_transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)]">
         <div
@@ -48,10 +50,11 @@ export function CodeEditor({ value, onChange, placeholder }: CodeEditorProps) {
         <textarea
           ref={textareaRef}
           spellCheck={false}
+          readOnly={readOnly}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
-          className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent px-5 py-5 font-mono text-[14px] leading-6 text-white outline-none placeholder:text-white/25"
+          className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent px-5 py-5 font-mono text-[14px] leading-6 text-white outline-none placeholder:text-white/25 read-only:cursor-default"
         />
       </div>
     </div>

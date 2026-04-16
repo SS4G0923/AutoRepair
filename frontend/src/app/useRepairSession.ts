@@ -16,6 +16,7 @@ import type {
 } from "../types";
 import {
   applyUnifiedDiffToText,
+  blobToBase64,
   buildSummary,
   createStageState,
   fileToBase64,
@@ -54,6 +55,52 @@ const knownDefaultEntrypoints = new Set<string>([
   "main.c",
   "main.cpp",
 ]);
+
+interface ProjectFilesResponse {
+  error?: string;
+  entrypoint_options?: ProjectEntrypointOption[];
+  preview_path?: string;
+  preview_content?: string;
+}
+
+interface ProjectPatchPayload {
+  filename: string;
+  language: CodeLanguage;
+  git_diff: string;
+  project_subdir?: string;
+  project_zip_base64?: string;
+  github_repo_url?: string;
+  github_ref?: string;
+  zip_filename?: string;
+}
+
+function extractFilenameFromDisposition(headerValue: string | null, fallback: string) {
+  if (!headerValue) {
+    return fallback;
+  }
+  const encodedMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return fallback;
+    }
+  }
+  const plainMatch = headerValue.match(/filename="([^"]+)"|filename=([^;]+)/i);
+  const candidate = plainMatch?.[1] ?? plainMatch?.[2];
+  return candidate?.trim() || fallback;
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+}
 
 interface UseRepairSessionOptions {
   apiBaseUrl: string;
@@ -94,11 +141,91 @@ export function useRepairSession({
   const [errorMessage, setErrorMessage] = useState("");
   const [diffDecisionMessage, setDiffDecisionMessage] = useState("");
   const [diffApplied, setDiffApplied] = useState(false);
+  const [projectActionLoading, setProjectActionLoading] = useState(false);
 
   const streamAbortRef = useRef<AbortController | null>(null);
   const projectFilesRequestRef = useRef(0);
+  const [projectPreviewNonce, setProjectPreviewNonce] = useState(0);
   const activeLanguage = languageOptions.find((item) => item.value === language) ?? languageOptions[0];
   const languageSupported = activeLanguage.supported;
+
+  function resolveProjectSelection() {
+    const normalizedEntrypoint = entrypointPath.trim();
+    const normalizedSubdir = projectSubdir.trim();
+    const selectedProjectEntrypoint =
+      normalizedEntrypoint || projectEntrypointOptions[0]?.path || "";
+    const selectedProjectLanguage =
+      projectEntrypointOptions.find((item) => item.path === selectedProjectEntrypoint)?.language ?? language;
+    return {
+      normalizedEntrypoint,
+      normalizedSubdir,
+      selectedProjectEntrypoint,
+      selectedProjectLanguage,
+    };
+  }
+
+  function buildProjectSourcePayload(previewPath?: string) {
+    const normalizedPreviewPath = previewPath?.trim() || entrypointPath.trim();
+    if (agentSourceType === "zip") {
+      const normalizedSubdir = projectSubdir.trim();
+      if (!zipFileBase64) {
+        return null;
+      }
+      return {
+        project_zip_base64: zipFileBase64,
+        ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
+        ...(normalizedPreviewPath ? { preview_path: normalizedPreviewPath } : {}),
+      };
+    }
+    if (agentSourceType === "github") {
+      const normalizedRepoUrl = githubRepoUrl.trim();
+      const normalizedRef = githubRef.trim();
+      if (!normalizedRepoUrl) {
+        return null;
+      }
+      return {
+        github_repo_url: normalizedRepoUrl,
+        ...(normalizedRef ? { github_ref: normalizedRef } : {}),
+        ...(normalizedPreviewPath ? { preview_path: normalizedPreviewPath } : {}),
+      };
+    }
+    return null;
+  }
+
+  function buildProjectPatchPayload(): ProjectPatchPayload {
+    const { normalizedSubdir, selectedProjectEntrypoint, selectedProjectLanguage } = resolveProjectSelection();
+    if (!selectedProjectEntrypoint) {
+      throw new Error(dict.projectFilesEmpty);
+    }
+    if (!finalDiff.trim()) {
+      throw new Error(dict.applyFailed);
+    }
+    if (agentSourceType === "zip") {
+      if (!zipFileBase64) {
+        throw new Error(dict.zipRequired);
+      }
+      return {
+        filename: selectedProjectEntrypoint,
+        language: selectedProjectLanguage,
+        git_diff: finalDiff,
+        ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
+        project_zip_base64: zipFileBase64,
+        ...(zipFileName ? { zip_filename: zipFileName } : {}),
+      };
+    }
+    const normalizedRepoUrl = githubRepoUrl.trim();
+    const normalizedRef = githubRef.trim();
+    if (!normalizedRepoUrl) {
+      throw new Error(dict.githubRepoRequired);
+    }
+    return {
+      filename: selectedProjectEntrypoint,
+      language: selectedProjectLanguage,
+      git_diff: finalDiff,
+      github_repo_url: normalizedRepoUrl,
+      ...(normalizedRef ? { github_ref: normalizedRef } : {}),
+    };
+  }
 
   useEffect(() => {
     if (agentSourceType !== "single_file") {
@@ -127,24 +254,11 @@ export function useRepairSession({
     if (agentSourceType === "single_file") {
       setProjectEntrypointOptions([]);
       setProjectFilesLoading(false);
+      setProjectPreviewNonce(0);
       return;
     }
 
-    const payload =
-      agentSourceType === "zip"
-        ? zipFileBase64
-          ? {
-              project_zip_base64: zipFileBase64,
-              ...(projectSubdir.trim() ? { project_subdir: projectSubdir.trim() } : {}),
-            }
-          : null
-        : githubRepoUrl.trim()
-          ? {
-              github_repo_url: githubRepoUrl.trim(),
-              ...(githubRef.trim() ? { github_ref: githubRef.trim() } : {}),
-              ...(projectSubdir.trim() ? { project_subdir: projectSubdir.trim() } : {}),
-            }
-          : null;
+    const payload = buildProjectSourcePayload();
 
     if (!payload) {
       setProjectEntrypointOptions([]);
@@ -155,6 +269,7 @@ export function useRepairSession({
     const requestId = projectFilesRequestRef.current + 1;
     projectFilesRequestRef.current = requestId;
     setProjectFilesLoading(true);
+    setCode("");
 
     const timeoutId = window.setTimeout(() => {
       void (async () => {
@@ -167,10 +282,7 @@ export function useRepairSession({
             },
             body: JSON.stringify(payload),
           });
-          const data = (await response.json().catch(() => ({}))) as {
-            error?: string;
-            entrypoint_options?: ProjectEntrypointOption[];
-          };
+          const data = (await response.json().catch(() => ({}))) as ProjectFilesResponse;
           if (!response.ok) {
             throw new Error(data.error || dict.projectFilesLoadFailed);
           }
@@ -179,10 +291,13 @@ export function useRepairSession({
           }
           const nextOptions = Array.isArray(data.entrypoint_options) ? data.entrypoint_options : [];
           setProjectEntrypointOptions(nextOptions);
+          if (typeof data.preview_content === "string") {
+            setCode(data.preview_content);
+          }
           setEntrypointPath((current) => {
-            const preferred =
-              nextOptions.find((item) => item.path === current) ??
-              nextOptions[0];
+            const preferredPath =
+              (typeof data.preview_path === "string" && data.preview_path) || current;
+            const preferred = nextOptions.find((item) => item.path === preferredPath) ?? nextOptions[0];
             if (preferred) {
               setLanguage(preferred.language);
               return preferred.path;
@@ -199,6 +314,7 @@ export function useRepairSession({
           }
           setProjectEntrypointOptions([]);
           setEntrypointPath("");
+          setCode("");
           setErrorMessage(error instanceof Error ? error.message : String(error));
           setStatus("error");
         } finally {
@@ -212,7 +328,18 @@ export function useRepairSession({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [agentSourceType, apiBaseUrl, dict.projectFilesEmpty, dict.projectFilesLoadFailed, githubRef, githubRepoUrl, projectSubdir, zipFileBase64]);
+  }, [
+    agentSourceType,
+    apiBaseUrl,
+    dict.projectFilesEmpty,
+    dict.projectFilesLoadFailed,
+    entrypointPath,
+    githubRef,
+    githubRepoUrl,
+    projectPreviewNonce,
+    projectSubdir,
+    zipFileBase64,
+  ]);
 
   function resetRepairState(shouldAbort = true) {
     if (shouldAbort) {
@@ -228,6 +355,7 @@ export function useRepairSession({
     setErrorMessage("");
     setDiffDecisionMessage("");
     setDiffApplied(false);
+    setProjectActionLoading(false);
   }
 
   async function handleZipSelected(file: File | null) {
@@ -236,6 +364,7 @@ export function useRepairSession({
       setZipFileBase64("");
       setProjectEntrypointOptions([]);
       setEntrypointPath("");
+      setCode("");
       return;
     }
 
@@ -252,12 +381,8 @@ export function useRepairSession({
   }
 
   function buildRepairPayload() {
-    const normalizedEntrypoint = entrypointPath.trim();
-    const normalizedSubdir = projectSubdir.trim();
-    const selectedProjectEntrypoint =
-      normalizedEntrypoint || projectEntrypointOptions[0]?.path || "";
-    const selectedProjectLanguage =
-      projectEntrypointOptions.find((item) => item.path === selectedProjectEntrypoint)?.language ?? language;
+    const { normalizedEntrypoint, normalizedSubdir, selectedProjectEntrypoint, selectedProjectLanguage } =
+      resolveProjectSelection();
 
     if (agentSourceType === "single_file") {
       return {
@@ -301,7 +426,6 @@ export function useRepairSession({
       ...(model ? { model } : {}),
       github_repo_url: normalizedRepoUrl,
       ...(normalizedRef ? { github_ref: normalizedRef } : {}),
-      ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
     };
   }
 
@@ -332,6 +456,9 @@ export function useRepairSession({
     }
 
     if (eventName === "run_result") {
+      if (typeof data.entrypoint_code === "string" && agentSourceType !== "single_file") {
+        setCode(data.entrypoint_code);
+      }
       setRunResult({
         input_text: typeof data.input_text === "string" ? data.input_text : undefined,
         stdout: String(data.stdout ?? ""),
@@ -623,9 +750,62 @@ export function useRepairSession({
     setStatus("error");
   }
 
-  function handleApplyDiff() {
+  async function handleApplyDiff() {
     if (agentSourceType !== "single_file") {
-      setDiffDecisionMessage(dict.applyProjectOnly);
+      try {
+        setProjectActionLoading(true);
+        setDiffDecisionMessage(dict.applyProjectActionRunning);
+        const payload = buildProjectPatchPayload();
+        if (agentSourceType === "zip") {
+          const response = await fetch(`${apiBaseUrl}/api/repair/project-download`, {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            const data = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(data.error || dict.applyFailed);
+          }
+          const blob = await response.blob();
+          const filename = extractFilenameFromDisposition(
+            response.headers.get("Content-Disposition"),
+            "project-patched.zip",
+          );
+          triggerBlobDownload(blob, filename);
+          const encoded = await blobToBase64(blob);
+          setZipFileName(filename);
+          setZipFileBase64(encoded);
+          setProjectPreviewNonce((current) => current + 1);
+          setDiffApplied(true);
+          setDiffDecisionMessage(dict.applyProjectDownloadStarted);
+          return;
+        }
+
+        const response = await fetch(`${apiBaseUrl}/api/repair/project-push`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+        if (!response.ok) {
+          throw new Error(data.error || dict.applyFailed);
+        }
+        setProjectPreviewNonce((current) => current + 1);
+        setDiffApplied(true);
+        setDiffDecisionMessage(data.message || dict.applyProjectPushStarted);
+      } catch (error) {
+        setDiffDecisionMessage(
+          `${dict.applyFailed}${error instanceof Error ? ` ${error.message}` : ""}`.trim(),
+        );
+      } finally {
+        setProjectActionLoading(false);
+      }
       return;
     }
     try {
@@ -658,6 +838,11 @@ export function useRepairSession({
 
   function handleGithubRepoUrlChange(value: string) {
     setGithubRepoUrl(value);
+    if (!value.trim()) {
+      setEntrypointPath("");
+      setProjectEntrypointOptions([]);
+      setCode("");
+    }
   }
 
   function handleGithubRefChange(value: string) {
@@ -666,19 +851,27 @@ export function useRepairSession({
 
   function handleSourceTypeChange(value: AgentSourceType) {
     setAgentSourceType(value);
+    setProjectActionLoading(false);
     if (value === "single_file") {
       setProjectEntrypointOptions([]);
       setProjectFilesLoading(false);
       setEntrypointPath(defaultEntrypointForLanguage(language));
     } else {
       setEntrypointPath("");
+      setCode("");
     }
   }
 
   function startNewAgentSession() {
-    setCode(codeTemplates[language]);
     setInputText("");
-    setEntrypointPath(defaultEntrypointForLanguage(language));
+    if (agentSourceType === "single_file") {
+      setCode(codeTemplates[language]);
+      setEntrypointPath(defaultEntrypointForLanguage(language));
+      setProjectPreviewNonce(0);
+    } else {
+      setCode("");
+      setProjectPreviewNonce((current) => current + 1);
+    }
     resetRepairState();
   }
 
@@ -690,12 +883,13 @@ export function useRepairSession({
     setStatus("idle");
     setDiffDecisionMessage("");
     setDiffApplied(false);
+    setProjectActionLoading(false);
   }
 
   function loadHistorySnapshot(snapshot: AgentHistorySnapshot) {
     setAgentSourceType(snapshot.source_type ?? "single_file");
     setEntrypointPath(snapshot.filename ?? defaultEntrypointForLanguage(snapshot.language ?? "python"));
-    setProjectSubdir(snapshot.project_subdir ?? "");
+    setProjectSubdir(snapshot.source_type === "zip" ? snapshot.project_subdir ?? "" : "");
     setGithubRepoUrl(snapshot.github_repo_url ?? "");
     setGithubRef(snapshot.github_ref ?? "");
     setZipFileName("");
@@ -708,11 +902,7 @@ export function useRepairSession({
     );
     setProjectFilesLoading(false);
     setLanguage(snapshot.language ?? "python");
-    setCode(
-      snapshot.source_type === "single_file"
-        ? snapshot.code ?? codeTemplates[snapshot.language ?? "python"]
-        : codeTemplates[snapshot.language ?? "python"],
-    );
+    setCode(snapshot.code ?? codeTemplates[snapshot.language ?? "python"]);
     setRunResult(snapshot.run_result ?? null);
     setStages(normalizeStageMap(snapshot.stages));
     setEvents(snapshot.events ?? []);
@@ -738,6 +928,7 @@ export function useRepairSession({
     setErrorMessage(snapshot.error_message ?? "");
     setDiffDecisionMessage("");
     setDiffApplied(false);
+    setProjectActionLoading(false);
     setStatus(snapshot.error_message ? "error" : snapshot.final_status ? "done" : "idle");
   }
 
@@ -761,6 +952,7 @@ export function useRepairSession({
     errorMessage,
     diffDecisionMessage,
     diffApplied,
+    projectActionLoading,
     languageSupported,
     projectEntrypointOptions,
     projectFilesLoading,

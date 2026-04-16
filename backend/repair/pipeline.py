@@ -1112,6 +1112,7 @@ def run_repair_pipeline(
                 "stdout": execution.stdout,
                 "stderr": execution.stderr,
                 "entrypoint": workspace.entrypoint,
+                "entrypoint_code": workspace.entrypoint_code,
                 "source_type": workspace.source_type,
                 "file_count": len(workspace.file_map),
             },

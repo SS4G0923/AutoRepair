@@ -67,6 +67,7 @@ class ProjectFileInput:
 class PreparedProjectWorkspace:
     source_type: str
     root_dir: Path
+    source_root: Path
     language: str
     entrypoint: str
     file_map: dict[str, str]
@@ -102,6 +103,7 @@ class PreparedProjectWorkspace:
 class ProjectSourcePreview:
     source_type: str
     root_dir: Path
+    source_root: Path
     source_label: str
     file_map: dict[str, str]
 
@@ -413,6 +415,7 @@ def _prepare_project_source(
     with tempfile.TemporaryDirectory(prefix="autorepair-project-", dir="/tmp") as tmp_dir:
         root_dir = Path(tmp_dir)
         source_root = root_dir
+        project_root = source_root
         source_type = "single_file"
         source_label = "inline-code"
 
@@ -424,37 +427,39 @@ def _prepare_project_source(
                 filename or default_entrypoint_for_language(language),
                 required_suffixes=language_spec.source_extensions,
             )
-            _write_project_file(source_root, entrypoint, code)
+            _write_project_file(project_root, entrypoint, code)
         elif project_files:
             source_type = "project_files"
             source_label = "inline-project-files"
             if len(project_files) > MAX_PROJECT_FILES:
                 raise ValueError(f"`project_files` may contain at most {MAX_PROJECT_FILES} files.")
             for project_file in project_files:
-                _write_project_file(source_root, project_file.path, project_file.content)
+                _write_project_file(project_root, project_file.path, project_file.content)
         elif project_zip_base64:
             source_type = "zip"
             source_label = "zip-upload"
             archive_bytes = _decode_zip_payload(project_zip_base64)
-            _extract_zip_into(source_root, archive_bytes)
+            _extract_zip_into(project_root, archive_bytes)
         else:
             source_type = "github"
             source_label = github_repo_url or "github-repo"
             source_root = _clone_github_repo_into(root_dir, github_repo_url or "", github_ref)
+            project_root = source_root
 
         if project_subdir:
             normalized_subdir = normalize_project_path(project_subdir)
-            source_root = (source_root / normalized_subdir).resolve()
-            if not source_root.is_dir():
+            project_root = (source_root / normalized_subdir).resolve()
+            if not project_root.is_dir():
                 raise ValueError(f"`project_subdir` was not found: {normalized_subdir}")
 
-        file_map, _ = _read_analyzable_files(source_root, language=language)
+        file_map, _ = _read_analyzable_files(project_root, language=language)
         if not file_map:
             raise ValueError("No analyzable text files were found in the provided project.")
 
         yield ProjectSourcePreview(
             source_type=source_type,
-            root_dir=source_root,
+            root_dir=project_root,
+            source_root=source_root,
             source_label=source_label,
             file_map=file_map,
         )
@@ -467,6 +472,7 @@ def list_project_entrypoint_options(
     github_repo_url: str | None = None,
     github_ref: str | None = None,
     project_subdir: str | None = None,
+    preview_path: str | None = None,
 ) -> dict[str, Any]:
     with _prepare_project_source(
         code=None,
@@ -486,11 +492,30 @@ def list_project_entrypoint_options(
             for path in sorted(preview.file_map.keys())
             if infer_language_from_path(path) is not None
         ]
+        selected_preview_path = ""
+        preview_content = ""
+        if options:
+            try:
+                normalized_preview_path = (
+                    normalize_project_path(preview_path)
+                    if isinstance(preview_path, str) and preview_path.strip()
+                    else ""
+                )
+            except ValueError:
+                normalized_preview_path = ""
+            available_paths = {str(item["path"]) for item in options}
+            if normalized_preview_path in available_paths:
+                selected_preview_path = normalized_preview_path
+            else:
+                selected_preview_path = str(options[0]["path"])
+            preview_content = preview.file_map.get(selected_preview_path, "")
         return {
             "source_type": preview.source_type,
             "source_label": preview.source_label,
             "file_count": len(preview.file_map),
             "entrypoint_options": options,
+            "preview_path": selected_preview_path,
+            "preview_content": preview_content,
         }
 
 
@@ -535,6 +560,7 @@ def prepare_project_workspace(
         yield PreparedProjectWorkspace(
             source_type=preview.source_type,
             root_dir=preview.root_dir,
+            source_root=preview.source_root,
             language=language,
             entrypoint=resolved_entrypoint,
             file_map=file_map,

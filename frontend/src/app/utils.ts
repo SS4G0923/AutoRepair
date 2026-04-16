@@ -48,6 +48,23 @@ export function fileToBase64(file: File) {
   });
 }
 
+export function blobToBase64(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = typeof reader.result === "string" ? reader.result : "";
+      const commaIndex = raw.indexOf(",");
+      if (commaIndex === -1) {
+        reject(new Error("Failed to read binary payload."));
+        return;
+      }
+      resolve(raw.slice(commaIndex + 1));
+    };
+    reader.onerror = () => reject(new Error("Failed to read binary payload."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export function buildSummary(event: string, data: Record<string, unknown>) {
   if (event === "stage") {
     return `${String(data.stage)} · ${String(data.status)}`;
