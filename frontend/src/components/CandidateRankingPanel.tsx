@@ -1,4 +1,33 @@
 import type { StageName, UiLocale } from "../types";
+import { CollapsibleSection } from "./CollapsibleSection";
+
+type AssertionStatus = "passed" | "failed" | "skipped" | "unknown";
+
+interface AssertionStatusEntry {
+  index: number;
+  code: string;
+  target: string;
+  status: AssertionStatus;
+}
+
+interface ScoreBreakdownEntry {
+  code: string;
+  delta: number;
+  note?: string;
+}
+
+interface VerificationReport {
+  summary?: string;
+  verification_code?: string[];
+  assertion_targets?: string[];
+  assert_count?: number;
+  assertion_statuses?: AssertionStatusEntry[];
+  failed_assertion_index?: number | null;
+  verification_strategy?: string;
+  sanitization_notes?: string[];
+  passed?: boolean;
+  modified_files?: string[];
+}
 
 interface CandidateSummary {
   rank?: number;
@@ -15,6 +44,10 @@ interface CandidateSummary {
   verification_summary?: string | null;
   assert_count?: number;
   error_message?: string | null;
+  // Present only on the winning candidate (stage=verify, selected_candidate).
+  verification_report?: VerificationReport | null;
+  score_breakdown?: ScoreBreakdownEntry[];
+  verification_stderr?: string | null;
 }
 
 interface CandidateReportPayload {
@@ -25,7 +58,11 @@ interface CandidateReportPayload {
     candidate_key?: string;
     candidate_label?: string;
   } | null;
-  selected_candidate?: CandidateSummary | null;
+  selected_candidate?: (CandidateSummary & {
+    verification_report?: VerificationReport | null;
+    score_breakdown?: ScoreBreakdownEntry[];
+    verification_stderr?: string | null;
+  }) | null;
   candidates?: CandidateSummary[];
   ranked_candidates?: CandidateSummary[];
 }
@@ -65,6 +102,33 @@ const uiCopy = {
     passed: "Passed",
     failed: "Failed",
     generated: "Generated",
+    assertionsTitle: "Assertions",
+    assertionsMeta: (total: number, passed: number, failed: number) =>
+      `${passed}/${total} passed${failed > 0 ? `, ${failed} failed` : ""}`,
+    assertionPassed: "passed",
+    assertionFailed: "failed",
+    assertionSkipped: "not run",
+    assertionUnknown: "unclear",
+    assertionNoTarget: "(no description)",
+    assertionRuntimeOnly:
+      "This run used runtime rerun only — no custom assert statements were generated.",
+    verifyStderrTitle: "Verification stderr",
+    scoreBreakdownTitle: "Score breakdown",
+    scoreBreakdownMeta: (total: number) => `total ${total}`,
+    scoreRuleCopy: {
+      diff_generated: "Produced a valid unified diff",
+      patched_runtime_ok: "Patched project ran to completion",
+      patched_runtime_timeout: "Patched project timed out during rerun",
+      patched_runtime_failed: "Patched project still exited non-zero",
+      assertion_coverage: "Assertion coverage",
+      verification_ok: "Verification block passed cleanly",
+      verification_timeout: "Verification execution timed out",
+      verification_failed: "Verification execution failed",
+      verify_passed: "Rerun and assertions both passed",
+      extra_files_penalty: "Patch touched multiple files",
+      diff_size_penalty: "Large patch size",
+      error_reported: "Error reported during verification",
+    } as Record<string, string>,
   },
   zh: {
     headingCodeMulti: "候选 Patch 委员会",
@@ -88,6 +152,32 @@ const uiCopy = {
     passed: "通过",
     failed: "失败",
     generated: "已生成",
+    assertionsTitle: "断言检查",
+    assertionsMeta: (total: number, passed: number, failed: number) =>
+      `${passed}/${total} 通过${failed > 0 ? `，${failed} 失败` : ""}`,
+    assertionPassed: "通过",
+    assertionFailed: "失败",
+    assertionSkipped: "未执行",
+    assertionUnknown: "未知",
+    assertionNoTarget: "（未提供说明）",
+    assertionRuntimeOnly: "本次仅做了运行时重跑，没有生成自定义 assert。",
+    verifyStderrTitle: "验证错误输出",
+    scoreBreakdownTitle: "得分依据",
+    scoreBreakdownMeta: (total: number) => `合计 ${total}`,
+    scoreRuleCopy: {
+      diff_generated: "生成了合法的 unified diff",
+      patched_runtime_ok: "打过补丁的项目可以正常跑通",
+      patched_runtime_timeout: "打过补丁的项目运行超时",
+      patched_runtime_failed: "打过补丁的项目仍以非 0 退出",
+      assertion_coverage: "断言覆盖度",
+      verification_ok: "验证脚本（assert + 重跑）顺利通过",
+      verification_timeout: "验证脚本执行超时",
+      verification_failed: "验证脚本执行失败",
+      verify_passed: "重跑与所有断言同时通过",
+      extra_files_penalty: "补丁改动了多个文件",
+      diff_size_penalty: "补丁体量较大",
+      error_reported: "验证期间报告了错误",
+    } as Record<string, string>,
   },
 } as const;
 
@@ -322,6 +412,13 @@ export function CandidateRankingPanel({
         })}
       </div>
 
+      {stage === "verify" && report.selected_candidate ? (
+        <VerifyDetails
+          dict={dict}
+          selected={report.selected_candidate}
+        />
+      ) : null}
+
       {!compact ? (
         <details className="rounded-[20px] border border-black/5 bg-black/[0.02] px-4 py-3 dark:border-white/10 dark:bg-white/[0.02]">
           <summary className="cursor-pointer text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
@@ -331,6 +428,176 @@ export function CandidateRankingPanel({
             {reportContent}
           </pre>
         </details>
+      ) : null}
+    </div>
+  );
+}
+
+const STATUS_STYLE: Record<AssertionStatus, { dot: string; chip: string; row: string }> = {
+  passed: {
+    dot: "bg-emerald-500",
+    chip: "border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
+    row: "border-emerald-400/20 bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06]",
+  },
+  failed: {
+    dot: "bg-rose-500",
+    chip: "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-200",
+    row: "border-rose-400/25 bg-rose-500/[0.06] dark:bg-rose-500/[0.08]",
+  },
+  skipped: {
+    dot: "bg-slate-400",
+    chip: "border-black/10 bg-black/[0.04] text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60",
+    row: "border-black/5 bg-black/[0.015] dark:border-white/10 dark:bg-white/[0.02]",
+  },
+  unknown: {
+    dot: "bg-amber-400",
+    chip: "border-amber-400/30 bg-amber-400/10 text-amber-700 dark:text-amber-200",
+    row: "border-amber-400/20 bg-amber-400/[0.06]",
+  },
+};
+
+function statusLabel(status: AssertionStatus, dict: (typeof uiCopy)["en"] | (typeof uiCopy)["zh"]): string {
+  switch (status) {
+    case "passed":
+      return dict.assertionPassed;
+    case "failed":
+      return dict.assertionFailed;
+    case "skipped":
+      return dict.assertionSkipped;
+    default:
+      return dict.assertionUnknown;
+  }
+}
+
+interface VerifyDetailsProps {
+  dict: (typeof uiCopy)["en"] | (typeof uiCopy)["zh"];
+  selected: NonNullable<CandidateReportPayload["selected_candidate"]>;
+}
+
+function VerifyDetails({ dict, selected }: VerifyDetailsProps) {
+  const report = selected.verification_report ?? null;
+  const statuses = report?.assertion_statuses ?? [];
+  const breakdown = selected.score_breakdown ?? [];
+  const runtimeOnly = report?.verification_strategy === "runtime_rerun_only";
+
+  const assertionsTotal = statuses.length;
+  const assertionsPassed = statuses.filter((s) => s.status === "passed").length;
+  const assertionsFailed = statuses.filter((s) => s.status === "failed").length;
+
+  const showAssertionsSection = Boolean(report) && (runtimeOnly || assertionsTotal > 0);
+  const showBreakdownSection = breakdown.length > 0;
+
+  if (!showAssertionsSection && !showBreakdownSection) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2">
+      {showAssertionsSection ? (
+        <CollapsibleSection
+          title={dict.assertionsTitle}
+          meta={
+            runtimeOnly
+              ? undefined
+              : dict.assertionsMeta(assertionsTotal, assertionsPassed, assertionsFailed)
+          }
+          defaultOpen
+        >
+          {runtimeOnly ? (
+            <div className="text-xs text-slate-600 dark:text-white/60">
+              {dict.assertionRuntimeOnly}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {statuses.map((entry) => {
+                const style = STATUS_STYLE[entry.status];
+                return (
+                  <div
+                    key={`${entry.index}-${entry.code}`}
+                    className={`rounded-xl border px-3 py-2.5 ${style.row}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${style.dot}`} />
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-white/45">
+                          #{entry.index}
+                        </span>
+                        <span className="truncate text-sm text-slate-800 dark:text-white/85">
+                          {entry.target.trim() || dict.assertionNoTarget}
+                        </span>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.2em] ${style.chip}`}
+                      >
+                        {statusLabel(entry.status, dict)}
+                      </span>
+                    </div>
+                    {entry.code ? (
+                      <pre className="mt-1.5 whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/[0.03] px-2 py-1 font-mono text-[11px] leading-5 text-slate-700 [overflow-wrap:anywhere] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/75">
+                        {entry.code}
+                      </pre>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              {selected.verification_stderr && (assertionsFailed > 0 || assertionsTotal === 0) ? (
+                <CollapsibleSection
+                  title={dict.verifyStderrTitle}
+                  meta={`${selected.verification_stderr.length.toLocaleString()} chars`}
+                  tone="warning"
+                >
+                  <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-slate-700 [overflow-wrap:anywhere] dark:text-white/70">
+                    {selected.verification_stderr}
+                  </pre>
+                </CollapsibleSection>
+              ) : null}
+            </div>
+          )}
+        </CollapsibleSection>
+      ) : null}
+
+      {showBreakdownSection ? (
+        <CollapsibleSection
+          title={dict.scoreBreakdownTitle}
+          meta={dict.scoreBreakdownMeta(typeof selected.score === "number" ? selected.score : 0)}
+          defaultOpen
+        >
+          <div className="space-y-1.5">
+            {breakdown.map((entry, idx) => {
+              const isBonus = entry.delta > 0;
+              const label =
+                dict.scoreRuleCopy[entry.code] || entry.code.replace(/_/g, " ");
+              return (
+                <div
+                  key={`${entry.code}-${idx}`}
+                  className="flex items-start justify-between gap-3 rounded-xl border border-black/5 bg-black/[0.02] px-3 py-2 dark:border-white/10 dark:bg-white/[0.02]"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm text-slate-800 dark:text-white/85">
+                      {label}
+                    </div>
+                    {entry.note ? (
+                      <div className="mt-0.5 text-[11px] text-slate-500 dark:text-white/50">
+                        {entry.note}
+                      </div>
+                    ) : null}
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full border px-2.5 py-0.5 font-mono text-[11px] ${
+                      isBonus
+                        ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                        : "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-200"
+                    }`}
+                  >
+                    {isBonus ? "+" : ""}
+                    {entry.delta}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </CollapsibleSection>
       ) : null}
     </div>
   );

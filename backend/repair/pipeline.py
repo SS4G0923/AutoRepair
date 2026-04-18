@@ -298,6 +298,7 @@ class PatchCandidateResult:
     skipped_top_level_nodes: list[str] = field(default_factory=list)
     verify_passed: bool = False
     score: int = 0
+    score_breakdown: list[dict[str, Any]] = field(default_factory=list)
     error_message: str | None = None
     rank: int = 0
 
@@ -873,6 +874,120 @@ def _build_verification_script(patched_code: str, verification_code: list[str]) 
     return f"{base_code}\n\n{verification_block}\n"
 
 
+def _base_line_count(patched_code: str) -> int:
+    """Number of source lines that precede the verification block in the script
+    produced by :func:`_build_verification_script`.
+    """
+    stripped = patched_code.rstrip("\n")
+    if not stripped:
+        return 0
+    return stripped.count("\n") + 1
+
+
+_TRACEBACK_VERIFY_FRAME_RE = re.compile(
+    r'File "[^"]*", line (\d+), in __autorepair_verify__'
+)
+
+
+def _detect_failed_verification_line(
+    verification_execution: Any,
+    *,
+    base_line_count: int,
+    verification_code_len: int,
+) -> int | None:
+    """Best-effort: parse a failed verification execution's stderr and return
+    the 0-based index into ``verification_code`` of the line that raised.
+
+    Returns ``None`` when the execution was not a failure, when the error did
+    not occur inside ``__autorepair_verify__``, or when the traceback line
+    cannot be mapped back into the supplied verification code.
+    """
+    if verification_execution is None:
+        return None
+    if getattr(verification_execution, "ok", False):
+        return None
+    stderr = getattr(verification_execution, "stderr", "") or ""
+    if not stderr:
+        return None
+
+    matches = _TRACEBACK_VERIFY_FRAME_RE.findall(stderr)
+    if not matches:
+        return None
+    try:
+        script_line = int(matches[-1])
+    except ValueError:
+        return None
+
+    # Line layout produced by ``_build_verification_script``:
+    #   lines 1..N               -> base (patched) source
+    #   line N + 1               -> blank ("\n\n")
+    #   line N + 2               -> "def __autorepair_verify__():"
+    #   line N + 3 + i           -> verification_code[i]
+    idx = script_line - (base_line_count + 3)
+    if 0 <= idx < verification_code_len:
+        return idx
+    return None
+
+
+def _is_assert_line(code_line: str) -> bool:
+    stripped = (code_line or "").strip()
+    if not stripped:
+        return False
+    if stripped == "assert":
+        return True
+    return stripped.startswith("assert ") or stripped.startswith("assert(")
+
+
+def _compute_assertion_statuses(
+    *,
+    verification_code: list[str],
+    assertion_targets: list[str],
+    verify_passed: bool,
+    failed_line_index: int | None,
+) -> list[dict[str, Any]]:
+    """Pair each assertion with its natural-language target and a status.
+
+    - ``passed`` : the assertion ran and did not raise.
+    - ``failed`` : the assertion is the one that raised (AssertionError).
+    - ``skipped``: a prior assertion failed / an earlier line raised, so this
+      assertion never executed.
+    - ``unknown``: verification failed for a non-assertion reason (NameError,
+      etc.) and we cannot tell which assertion status to report.
+    """
+    entries: list[dict[str, Any]] = []
+    assertion_ordinal = 0
+    for code_index, line in enumerate(verification_code):
+        if not _is_assert_line(line):
+            continue
+        target = (
+            assertion_targets[assertion_ordinal]
+            if assertion_ordinal < len(assertion_targets)
+            else ""
+        )
+
+        if verify_passed:
+            status = "passed"
+        elif failed_line_index is None:
+            status = "unknown"
+        elif code_index < failed_line_index:
+            status = "passed"
+        elif code_index == failed_line_index:
+            status = "failed"
+        else:
+            status = "skipped"
+
+        entries.append(
+            {
+                "index": assertion_ordinal + 1,
+                "code": line.strip(),
+                "target": target,
+                "status": status,
+            }
+        )
+        assertion_ordinal += 1
+    return entries
+
+
 def _is_docstring_expr(node: ast.stmt) -> bool:
     if not isinstance(node, ast.Expr):
         return False
@@ -1144,6 +1259,7 @@ def _summarize_candidate(candidate: PatchCandidateResult, *, include_details: bo
     if include_details:
         summary["git_diff"] = candidate.git_diff
         summary["verification_report"] = candidate.verification_report
+        summary["score_breakdown"] = candidate.score_breakdown
         summary["patched_execution"] = (
             candidate.patched_execution.to_dict() if candidate.patched_execution is not None else None
         )
@@ -1207,32 +1323,112 @@ def _build_candidate_generation_report(
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def _score_candidate(candidate: PatchCandidateResult) -> int:
+def _score_candidate_with_breakdown(
+    candidate: PatchCandidateResult,
+) -> tuple[int, list[dict[str, Any]]]:
+    """Compute the candidate's score together with a per-rule breakdown.
+
+    Each breakdown entry captures (`code`, `delta`, `note`) so the UI can render
+    a transparent "why did we score it this way" table without re-implementing
+    the same heuristics on the frontend.
+    """
+
+    breakdown: list[dict[str, Any]] = []
     score = 0
+
+    def add(code: str, delta: int, note: str = "") -> None:
+        nonlocal score
+        if delta == 0:
+            return
+        entry: dict[str, Any] = {"code": code, "delta": delta}
+        if note:
+            entry["note"] = note
+        breakdown.append(entry)
+        score += delta
+
     if candidate.git_diff:
-        score += 20
+        add("diff_generated", 20, "Patch produced a valid unified diff")
     if candidate.patched_execution is not None:
         if candidate.patched_execution.ok:
-            score += 40
+            add(
+                "patched_runtime_ok",
+                40,
+                "Patched project ran to completion",
+            )
         elif candidate.patched_execution.timed_out:
-            score -= 18
+            add(
+                "patched_runtime_timeout",
+                -18,
+                "Patched project timed out during rerun",
+            )
         else:
-            score -= 8
+            add(
+                "patched_runtime_failed",
+                -8,
+                "Patched project still exited with a non-zero status",
+            )
     if candidate.verification_report is not None:
-        score += min(int(candidate.verification_report.get("assert_count") or 0), 6)
+        assert_count = int(candidate.verification_report.get("assert_count") or 0)
+        assert_bonus = min(assert_count, 6)
+        if assert_bonus > 0:
+            add(
+                "assertion_coverage",
+                assert_bonus,
+                f"{assert_count} assertion{'s' if assert_count != 1 else ''} "
+                f"(counted up to 6)",
+            )
     if candidate.verification_execution is not None:
         if candidate.verification_execution.ok:
-            score += 34
+            add(
+                "verification_ok",
+                34,
+                "Verification block (asserts + rerun) passed cleanly",
+            )
         elif candidate.verification_execution.timed_out:
-            score -= 18
+            add(
+                "verification_timeout",
+                -18,
+                "Verification execution timed out",
+            )
         else:
-            score -= 10
+            add(
+                "verification_failed",
+                -10,
+                "Verification execution raised or exited non-zero",
+            )
     if candidate.verify_passed:
-        score += 25
-    score -= max(0, candidate.changed_file_count - 1) * 3
-    score -= min(candidate.diff_line_count, 120) // 12
+        add(
+            "verify_passed",
+            25,
+            "Both the rerun and the assertions passed",
+        )
+
+    files_penalty = max(0, candidate.changed_file_count - 1) * 3
+    if files_penalty > 0:
+        add(
+            "extra_files_penalty",
+            -files_penalty,
+            f"Patch touched {candidate.changed_file_count} files (−3 per extra file)",
+        )
+    lines_penalty = min(candidate.diff_line_count, 120) // 12
+    if lines_penalty > 0:
+        add(
+            "diff_size_penalty",
+            -lines_penalty,
+            f"{candidate.diff_line_count} changed lines (−1 per 12 lines, capped)",
+        )
     if candidate.error_message:
-        score -= 20
+        truncated = (candidate.error_message or "").strip().replace("\n", " ")
+        if len(truncated) > 140:
+            truncated = truncated[:137] + "..."
+        add("error_reported", -20, truncated or "An error was reported")
+
+    return score, breakdown
+
+
+def _score_candidate(candidate: PatchCandidateResult) -> int:
+    score, breakdown = _score_candidate_with_breakdown(candidate)
+    candidate.score_breakdown = breakdown
     return score
 
 
@@ -1849,10 +2045,25 @@ def run_repair_pipeline(
                         candidate.patched_execution.ok
                         and candidate.verification_execution.ok
                     )
+                    failed_line_index = _detect_failed_verification_line(
+                        candidate.verification_execution,
+                        base_line_count=_base_line_count(verification_base_source),
+                        verification_code_len=len(verify_report["verification_code"]),
+                    )
+                    assertion_statuses = _compute_assertion_statuses(
+                        verification_code=verify_report["verification_code"],
+                        assertion_targets=verify_report.get("assertion_targets") or [],
+                        verify_passed=candidate.verify_passed,
+                        failed_line_index=failed_line_index,
+                    )
                     candidate.verification_report = {
                         **verify_report,
                         "modified_files": candidate.modified_files,
                         "passed": candidate.verify_passed,
+                        "assertion_statuses": assertion_statuses,
+                        "failed_assertion_index": (
+                            failed_line_index if failed_line_index is not None else None
+                        ),
                     }
                     candidate.verification_stdout = candidate.verification_execution.stdout
                     candidate.verification_stderr = candidate.verification_execution.stderr
