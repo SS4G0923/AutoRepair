@@ -56,10 +56,13 @@ export interface ToolEventEntry {
 
 export interface StageState {
   status: "idle" | "started" | "explaining" | "completed";
+  reasoning: string;
   explain: string;
   report: string;
   diff: string;
   toolEvents: ToolEventEntry[];
+  retryAttempt?: number;
+  retryMax?: number;
 }
 
 export interface EventEntry {
@@ -106,6 +109,7 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  reasoning?: string;
   at: string;
 }
 
@@ -142,6 +146,7 @@ export interface ChatHistorySnapshot {
   messages: Array<{
     role: "user" | "assistant";
     content: string;
+    reasoning?: string;
     at: string;
   }>;
 }

@@ -428,6 +428,10 @@ def _event_summary(event: str, data: dict[str, Any]) -> str:
             f"{str(data.get('candidate_label') or data.get('candidate_key') or 'candidate')} · "
             f"{str(data.get('status'))}"
         )
+    if event == "stage_reasoning_chunk":
+        return f"{str(data.get('stage'))} · reasoning"
+    if event == "chat_reasoning_chunk":
+        return "chat · reasoning"
     if event == "error":
         return "error"
     if event == "result":
@@ -455,11 +459,11 @@ def _chat_history_title(messages: list[dict[str, str]]) -> str:
 
 def _empty_stage_map() -> dict[str, dict[str, Any]]:
     return {
-        "run": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
-        "inspect": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
-        "plan": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
-        "code": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
-        "verify": {"status": "idle", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "run": {"status": "idle", "reasoning": "", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "inspect": {"status": "idle", "reasoning": "", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "plan": {"status": "idle", "reasoning": "", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "code": {"status": "idle", "reasoning": "", "explain": "", "report": "", "diff": "", "toolEvents": []},
+        "verify": {"status": "idle", "reasoning": "", "explain": "", "report": "", "diff": "", "toolEvents": []},
     }
 
 
@@ -1289,6 +1293,10 @@ def repair_stream() -> Response:
             if stage in captured["stages"]:
                 captured["stages"][stage]["explain"] += str(outgoing.get("chunk", ""))
                 captured["stages"][stage]["status"] = "explaining"
+        elif event == "stage_reasoning_chunk":
+            stage = str(outgoing.get("stage", ""))
+            if stage in captured["stages"]:
+                captured["stages"][stage]["reasoning"] += str(outgoing.get("chunk", ""))
         elif event == "code_diff_chunk":
             captured["stages"]["code"]["diff"] += str(outgoing.get("chunk", ""))
         elif event == "tool_event":
@@ -1562,19 +1570,31 @@ def chat_stream() -> Response:
 
     event_queue: queue.Queue[str | object] = queue.Queue()
     sentinel = object()
+    assistant_reasoning = ""
 
     def emit(event: str, data: dict[str, Any]) -> None:
+        nonlocal assistant_reasoning
         outgoing = dict(data)
+        if event == "chat_reasoning_chunk":
+            assistant_reasoning += str(outgoing.get("chunk", ""))
         if event == "result":
             assistant_text = str(outgoing.get("message", "")).strip()
+            if isinstance(outgoing.get("reasoning"), str) and outgoing.get("reasoning"):
+                assistant_reasoning = str(outgoing.get("reasoning"))
             snapshot_messages = [
-                {"role": message.role, "content": message.content, "at": message.at or _ui_timestamp()}
+                {
+                    "role": message.role,
+                    "content": message.content,
+                    "reasoning": getattr(message, "reasoning", None),
+                    "at": message.at or _ui_timestamp(),
+                }
                 for message in chat_request.messages
             ]
             snapshot_messages.append(
                 {
                     "role": "assistant",
                     "content": assistant_text,
+                    "reasoning": assistant_reasoning.strip() or None,
                     "at": _ui_timestamp(),
                 }
             )

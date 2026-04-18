@@ -551,6 +551,22 @@ export function useRepairSession({
       return;
     }
 
+    if (eventName === "stage_reasoning_chunk") {
+      const stage = data.stage;
+      if (!isStageName(stage)) {
+        return;
+      }
+      const chunk = String(data.chunk ?? "");
+      setStages((current) => ({
+        ...current,
+        [stage]: {
+          ...current[stage],
+          reasoning: current[stage].reasoning + chunk,
+        },
+      }));
+      return;
+    }
+
     if (eventName === "code_diff_chunk") {
       const chunk = String(data.chunk ?? "");
       setStages((current) => ({
@@ -560,6 +576,39 @@ export function useRepairSession({
           diff: current.code.diff + chunk,
         },
       }));
+      return;
+    }
+
+    if (eventName === "candidate_status") {
+      const stage = data.stage;
+      if (!isStageName(stage)) {
+        return;
+      }
+      const status = typeof data.status === "string" ? data.status : "";
+      const attempt = typeof data.attempt === "number" ? Number(data.attempt) : undefined;
+      const maxAttempts = typeof data.max_attempts === "number" ? Number(data.max_attempts) : undefined;
+      setStages((current) => {
+        const existing = current[stage];
+        if (status === "retrying" && attempt !== undefined) {
+          return {
+            ...current,
+            [stage]: { ...existing, retryAttempt: attempt, retryMax: maxAttempts ?? existing.retryMax },
+          };
+        }
+        if (status === "failed" && attempt !== undefined && data.will_retry === true) {
+          return {
+            ...current,
+            [stage]: { ...existing, retryAttempt: attempt, retryMax: maxAttempts ?? existing.retryMax },
+          };
+        }
+        if (status === "generated" || status === "completed") {
+          return {
+            ...current,
+            [stage]: { ...existing, retryAttempt: undefined, retryMax: undefined },
+          };
+        }
+        return current;
+      });
       return;
     }
 

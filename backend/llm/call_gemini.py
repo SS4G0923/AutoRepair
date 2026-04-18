@@ -25,6 +25,17 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 class LLMCallError(RuntimeError):
     """Raised when a Gemini call fails or the response is not valid JSON."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_response: str | None = None,
+        json_parse_failed: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
+        self.json_parse_failed = json_parse_failed
+
 
 def create_gemini_client(api_key: str | None = None) -> Any:
     resolved_api_key = os.getenv("GEMINI_API_KEY") or (API_KEY if api_key is None else api_key)
@@ -96,7 +107,25 @@ def _json_candidates(response_text: str) -> list[str]:
     return candidates
 
 
+def _scan_for_json_object(response_text: str) -> dict[str, Any] | None:
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(response_text):
+        if char not in "{[":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(response_text, idx=index)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
 def _parse_json_response(response_text: str) -> dict[str, Any]:
+    scanned = _scan_for_json_object(response_text)
+    if scanned is not None:
+        return scanned
+
     for candidate in _json_candidates(response_text):
         try:
             parsed = json.loads(candidate)
@@ -106,7 +135,9 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
             return parsed
     raise LLMCallError(
         "Model response was not valid JSON. "
-        f"Raw response: {response_text[:500]}"
+        f"Raw response: {response_text[:500]}",
+        raw_response=response_text,
+        json_parse_failed=True,
     )
 
 
@@ -145,6 +176,7 @@ def call_llm_for_json(
     isJson: bool = True,
     stream: bool = False,
     stream_handler: Callable[[str], None] | None = None,
+    reasoning_handler: Callable[[str], None] | None = None,
     tools=None,
     tool_event_handler=None,
     metadata_handler: Callable[[dict[str, Any]], None] | None = None,

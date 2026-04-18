@@ -1,11 +1,13 @@
 import { AppCopy } from "../../i18n";
 import type { ChatMessage, ModelCatalogItem, ModelOptionValue } from "../../types";
+import { ReasoningPanel } from "../ReasoningPanel";
 
 interface ChatWorkspaceProps {
   activeModelLabel: string;
   chatError: string;
   chatInput: string;
   chatMessages: ChatMessage[];
+  chatReasoningStreaming: string;
   chatStreamingText: string;
   chatThinking: boolean;
   copy: AppCopy;
@@ -22,6 +24,7 @@ export function ChatWorkspace({
   chatError,
   chatInput,
   chatMessages,
+  chatReasoningStreaming,
   chatStreamingText,
   chatThinking,
   copy,
@@ -74,6 +77,17 @@ export function ChatWorkspace({
                     : "bg-white/85 text-slate-700 dark:bg-slate-900/90 dark:text-white"
                 }`}
               >
+                {message.role === "assistant" && message.reasoning?.trim() ? (
+                  <div className="mb-3">
+                    <ReasoningPanel
+                      label={copy.reasoningLabel}
+                      showLabel={copy.reasoningShow}
+                      hideLabel={copy.reasoningHide}
+                      content={message.reasoning}
+                      compact
+                    />
+                  </div>
+                ) : null}
                 <div className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</div>
                 <div
                   className={`mt-2 text-[11px] ${
@@ -90,8 +104,21 @@ export function ChatWorkspace({
 
           {chatThinking && !chatStreamingText ? (
             <div className="chat-thinking-bubble relative max-w-[85%] overflow-hidden rounded-[24px] bg-white/85 px-4 py-3 text-slate-700 dark:bg-slate-900/90 dark:text-white">
-              <div className="chat-thinking-glint pointer-events-none absolute inset-y-0 left-[-40%] w-[38%] bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/20" />
+              <div className="chat-thinking-glint pointer-events-none absolute inset-y-0 left-[-40%] w-[38%]" />
               <div className="relative text-sm">{copy.chatThinking}</div>
+            </div>
+          ) : null}
+
+          {chatReasoningStreaming ? (
+            <div className="max-w-[85%]">
+              <ReasoningPanel
+                label={copy.reasoningLabel}
+                showLabel={copy.reasoningShow}
+                hideLabel={copy.reasoningHide}
+                content={chatReasoningStreaming}
+                defaultOpen
+                compact
+              />
             </div>
           ) : null}
 

@@ -11,13 +11,122 @@ export const languageOptions: LanguageOption[] = [
 ];
 
 export const codeTemplates: Record<CodeLanguage, string> = {
-  python: `def divide(a, b):\n    return a / b\n\nprint(divide(3, 0))\n`,
-  javascript: `function divide(a, b) {\n  return a / b;\n}\n\nconsole.log(divide(3, 0));\n`,
-  typescript: `function divide(a: number, b: number) {\n  return a / b;\n}\n\nconsole.log(divide(3, 0));\n`,
-  java: `public class Main {\n    public static void main(String[] args) {\n        int x = 3 / 0;\n        System.out.println(x);\n    }\n}\n`,
-  go: `package main\n\nimport "fmt"\n\nfunc main() {\n    panic("example error")\n    fmt.Println("unreachable")\n}\n`,
-  c: `int main(void) {\n    int value = 10;\n    int divisor = 0;\n    return value / divisor;\n}\n`,
-  cpp: `int main() {\n    int value = 10;\n    int divisor = 0;\n    return value / divisor;\n}\n`,
+  python: `def calculate_stats(numbers):
+    total = sum(numbers)
+    mean = total / len(numbers)
+    minimum = numbers[0]
+    maximum = numbers[0]
+    for i in range(1, len(numbers) + 1):
+        if numbers[i] < minimum:
+            minimum = numbers[i]
+        if numbers[i] > maximum:
+            maximum = numbers[i]
+    return mean, minimum, maximum
+
+
+def main():
+    scores = [82, 91, 74, 68, 95, 88]
+    mean, minimum, maximum = calculate_stats(scores)
+    print(f"mean = {mean:.1f}")
+    print(f"min  = {minimum}")
+    print(f"max  = {maximum}")
+
+
+if __name__ == "__main__":
+    main()
+`,
+  javascript: `function factorial(n) {
+  if (n === 1) {
+    return 1;
+  }
+  return n * factorial(n - 1);
+}
+
+for (const n of [5, 3, 0]) {
+  console.log(\`\${n}! = \${factorial(n)}\`);
+}
+`,
+  typescript: `function factorial(n: number): number {
+  if (n === 1) {
+    return 1;
+  }
+  return n * factorial(n - 1);
+}
+
+for (const n of [5, 3, 0]) {
+  console.log(\`\${n}! = \${factorial(n)}\`);
+}
+`,
+  java: `public class Main {
+    public static int factorial(int n) {
+        if (n == 1) {
+            return 1;
+        }
+        return n * factorial(n - 1);
+    }
+
+    public static void main(String[] args) {
+        int[] values = {5, 3, 0};
+        for (int value : values) {
+            System.out.println(value + "! = " + factorial(value));
+        }
+    }
+}
+`,
+  go: `package main
+
+import "fmt"
+
+func findMax(numbers []int) int {
+    best := numbers[0]
+    for i := 1; i <= len(numbers); i++ {
+        if numbers[i] > best {
+            best = numbers[i]
+        }
+    }
+    return best
+}
+
+func main() {
+    numbers := []int{3, 1, 4, 1, 5, 9, 2, 6}
+    fmt.Printf("max = %d\\n", findMax(numbers))
+}
+`,
+  c: `#include <stdio.h>
+
+int average(int values[], int count) {
+    int total = 0;
+    for (int i = 0; i < count; i++) {
+        total += values[i];
+    }
+    return total / count;
+}
+
+int main(void) {
+    int data[] = {30, 50, 70};
+    int empty[] = {0};
+    printf("avg(data)  = %d\\n", average(data, 3));
+    printf("avg(empty) = %d\\n", average(empty, 0));
+    return 0;
+}
+`,
+  cpp: `#include <iostream>
+#include <vector>
+
+int average(const std::vector<int>& values) {
+    int total = 0;
+    for (int v : values) {
+        total += v;
+    }
+    return total / static_cast<int>(values.size());
+}
+
+int main() {
+    std::cout << "avg(data)  = " << average({30, 50, 70}) << std::endl;
+    std::cout << "avg(empty) = " << average({}) << std::endl;
+    return 0;
+}
+`,
 };
 
 export const stageOrder: StageName[] = ["inspect", "plan", "code", "verify"];
@@ -36,6 +145,57 @@ export const stageLabels: Record<UiLocale, Record<StageName, string>> = {
     plan: "修复计划",
     code: "代码生成",
     verify: "修复验证",
+  },
+};
+
+export const stageSubtitles: Record<UiLocale, Record<StageName, string>> = {
+  en: {
+    run: "Execute the project in a sandbox and collect the raw runtime output.",
+    inspect: "Read the runtime evidence and pinpoint the most likely root cause.",
+    plan: "Design a minimal, targeted fix based on the inspection report.",
+    code: "Produce a unified git diff that applies cleanly to the original project.",
+    verify: "Re-run the patched project and run assertions to confirm the fix.",
+  },
+  zh: {
+    run: "在沙箱里执行项目，收集原始的运行输出。",
+    inspect: "阅读运行证据，定位最可能的报错根因。",
+    plan: "基于分析结论，规划最小化的修复方案。",
+    code: "生成可直接应用到原项目的 unified git diff。",
+    verify: "重跑修复后项目并执行断言，确认修复真的生效。",
+  },
+};
+
+export const stageActiveHints: Record<UiLocale, Record<StageName, string>> = {
+  en: {
+    run: "Running the project and capturing stdout/stderr…",
+    inspect: "Inspecting traceback, dependencies, and likely root causes…",
+    plan: "Drafting a focused repair plan…",
+    code: "Generating the repair diff…",
+    verify: "Re-running the patched project and executing assertions…",
+  },
+  zh: {
+    run: "正在运行项目并捕获标准输出 / 错误输出…",
+    inspect: "正在分析 traceback、依赖图和可能的根因…",
+    plan: "正在草拟一份聚焦的修复计划…",
+    code: "正在生成修复所需的 diff…",
+    verify: "正在重跑打好补丁的项目并执行断言…",
+  },
+};
+
+export const stageExplainHints: Record<UiLocale, Record<StageName, string>> = {
+  en: {
+    run: "Summarizing the runtime output…",
+    inspect: "Summarizing the root-cause analysis…",
+    plan: "Summarizing the repair plan…",
+    code: "Summarizing the generated diff…",
+    verify: "Summarizing the verification results…",
+  },
+  zh: {
+    run: "正在总结运行输出…",
+    inspect: "正在总结根因分析结果…",
+    plan: "正在总结这份修复计划…",
+    code: "正在总结生成的补丁…",
+    verify: "正在总结验证结果…",
   },
 };
 
@@ -120,6 +280,9 @@ export const copy = {
     statusError: "Error",
     latest: "Latest stream",
     thinking: "Thinking",
+    reasoningLabel: "Reasoning",
+    reasoningShow: "Show reasoning",
+    reasoningHide: "Hide reasoning",
     noContent: "Waiting…",
     runOutput: "Runtime output",
     stdout: "STDOUT",
@@ -148,6 +311,7 @@ export const copy = {
     chatSend: "Send message",
     chatEmpty: "No messages yet. Start with a prompt on the bottom.",
     chatThinking: "Thinking",
+    chatReasoningEmpty: "Reasoning will appear here when the model returns it.",
     chatReset: "Clear chat",
     historyEmpty: "No saved conversations yet.",
     historyLoading: "Loading history...",
@@ -169,7 +333,11 @@ export const copy = {
     cancelHint: "Abort the current streaming request.",
     stageWaiting: "Idle",
     stageActive: "Running",
+    stageExplaining: "Explaining",
     stageDone: "Done",
+    stageProgressLabel: "Pipeline progress",
+    stageProgressFormat: "{done} / {total} stages complete",
+    stageRetryingLabel: "Retry {attempt}/{max}",
     billingOpen: "Upgrade",
     billingTitle: "Upgrade",
     billingHint: "",
@@ -434,6 +602,9 @@ export const copy = {
     statusError: "出错",
     latest: "最新流式内容",
     thinking: "思考中",
+    reasoningLabel: "思考过程",
+    reasoningShow: "展开思考",
+    reasoningHide: "收起思考",
     noContent: "等待中…",
     runOutput: "运行输出",
     stdout: "标准输出",
@@ -462,6 +633,7 @@ export const copy = {
     chatSend: "发送消息",
     chatEmpty: "还没有消息，从底部输入框开始对话。",
     chatThinking: "思考中",
+    chatReasoningEmpty: "如果模型返回了 reasoning，这里会显示。",
     chatReset: "清空对话",
     historyEmpty: "还没有保存的聊天记录。",
     historyLoading: "正在加载记录...",
@@ -483,7 +655,11 @@ export const copy = {
     cancelHint: "中止当前流式请求。",
     stageWaiting: "等待中",
     stageActive: "运行中",
+    stageExplaining: "总结中",
     stageDone: "已完成",
+    stageProgressLabel: "修复流水线",
+    stageProgressFormat: "已完成 {done} / {total} 个阶段",
+    stageRetryingLabel: "第 {attempt}/{max} 次重试",
     billingOpen: "升级",
     billingTitle: "升级",
     billingHint: "",

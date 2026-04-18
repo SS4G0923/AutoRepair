@@ -687,6 +687,7 @@ function App() {
                   chatError={chat.chatError}
                   chatInput={chat.chatInput}
                   chatMessages={chat.chatMessages}
+                  chatReasoningStreaming={chat.chatReasoningStreaming}
                   chatStreamingText={chat.chatStreamingText}
                   chatThinking={chat.chatThinking}
                   copy={dict}

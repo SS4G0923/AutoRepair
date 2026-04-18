@@ -15,6 +15,50 @@ import type {
   UiLocale,
 } from "../../types";
 
+function formatProgressLabel(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key) => {
+    const value = values[key];
+    return value === undefined || value === null ? "" : String(value);
+  });
+}
+
+interface StageProgressBarProps {
+  copy: AppCopy;
+  stages: Record<StageName, StageState>;
+}
+
+function StageProgressBar({ copy, stages }: StageProgressBarProps) {
+  const total = stageOrder.length;
+  const doneCount = stageOrder.filter((stage) => stages[stage].status === "completed").length;
+  const activeStage = stageOrder.find(
+    (stage) => stages[stage].status === "started" || stages[stage].status === "explaining",
+  );
+  const hasActivity = doneCount > 0 || Boolean(activeStage);
+  if (!hasActivity) {
+    return null;
+  }
+  const progressPct = Math.round((doneCount / total) * 100);
+
+  return (
+    <section className="rounded-[20px] border border-black/5 bg-white/60 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] uppercase tracking-[0.24em] text-slate-500 dark:text-white/55">
+          {copy.stageProgressLabel}
+        </div>
+        <div className="text-[11px] text-slate-500 dark:text-white/55">
+          {formatProgressLabel(copy.stageProgressFormat, { done: doneCount, total })}
+        </div>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-sky-400 via-indigo-400 to-emerald-400 transition-all duration-500"
+          style={{ width: `${progressPct}%` }}
+        />
+      </div>
+    </section>
+  );
+}
+
 interface AgentWorkspaceProps {
   agentSourceType: AgentSourceType;
   code: string;
@@ -485,6 +529,8 @@ export function AgentWorkspace({
               ) : null}
             </section>
           ) : null}
+
+          <StageProgressBar copy={copy} stages={stages} />
 
           {stageOrder.map((stage) => (
             <StageCard key={stage} locale={locale} stage={stage} state={stages[stage]} copy={copy} />

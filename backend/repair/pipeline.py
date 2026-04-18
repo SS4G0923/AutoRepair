@@ -4,6 +4,7 @@ import ast
 import difflib
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -29,10 +30,23 @@ from backend.repair.sandbox import run_project_safely
 MAX_CODE_CHARS = 100_000
 MAX_INPUT_CHARS = 20_000
 MAX_TIMEOUT_SEC = 30
+PATCH_GENERATION_MAX_ATTEMPTS = 3
+RETRYABLE_PATCH_GENERATION_ERROR_MARKERS: tuple[str, ...] = (
+    "Unified diff is missing a `+++` header.",
+    "Unified diff file section did not contain any hunks.",
+    "Unified diff did not contain any file sections.",
+    "Encountered a patch with neither old nor new path.",
+    "Repair model did not return a valid git diff or a full replacement file.",
+    "Repair model returned a diff without any hunks.",
+    "Invalid diff hunk header:",
+    "Diff context did not match the original code.",
+    "Diff deletion did not match the original code.",
+    "Unsupported diff line prefix:",
+)
 
 INSPECTOR_JSON_SYSTEM_PROMPT_TEMPLATE = """You are an expert bug inspection agent.
 You will receive a structured local runtime report for an uploaded {language_name} file or project.
-Return a compact JSON object that is directly useful for planning and fixing the bug.
+Return EXACTLY one valid JSON object and nothing else.
 
 Requirements:
 - Focus on the most likely root cause.
@@ -40,6 +54,39 @@ Requirements:
 - Include validation ideas for the final fix.
 - Stay grounded in the runtime evidence and source code.
 - Use the available function tools whenever you need precise local evidence from the uploaded file or runtime outputs.
+- Do not return Markdown fences, headings, bullets, commentary, or prose before/after the JSON.
+- If you are uncertain, keep the uncertainty inside JSON fields instead of switching to prose.
+- If the issue is caused by path/package/classpath mismatch, explicitly name the expected path and the actual path.
+
+Return JSON with this shape:
+{{
+  "summary": "1-2 sentence bug summary",
+  "root_cause": "most likely root cause",
+  "confidence": "high|medium|low",
+  "primary_location": {{
+    "path": "relative/path.ext or null",
+    "line": 123,
+    "symbol": "function/class/method name or null",
+    "reason": "why this location is suspicious"
+  }},
+  "supporting_evidence": [
+    "specific runtime or source evidence"
+  ],
+  "fix_strategy": [
+    "minimal repair direction"
+  ],
+  "validation_ideas": [
+    "how to verify the fix"
+  ],
+  "open_questions": [
+    "remaining uncertainty or missing evidence"
+  ]
+}}
+
+Schema rules:
+- `primary_location.path`, `primary_location.line`, and `primary_location.symbol` may be null when unknown.
+- `supporting_evidence`, `fix_strategy`, `validation_ideas`, and `open_questions` must always be JSON arrays of strings.
+- Every string value must be plain text, not Markdown.
 """
 
 PLANNER_SYSTEM_PROMPT = """You are a helpful bug fix planning expert, you will be presented with bug information from a bug inspection expert.
@@ -124,6 +171,100 @@ def _render_code_system_prompt(language: str) -> str:
         language_name=get_language_spec(language).display_name
     )
 
+
+def _first_nonempty_line(text: str) -> str:
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line in {"```", "```json"}:
+            continue
+        return line
+    return ""
+
+
+def _extract_root_cause_hint(raw_response: str) -> str:
+    heading_match = re.search(
+        r"(?is)(?:^|\n)#+\s*root cause\s*\n(?P<body>.+?)(?:\n#+\s|\Z)",
+        raw_response,
+    )
+    if heading_match:
+        body = " ".join(part.strip() for part in heading_match.group("body").splitlines() if part.strip())
+        if body:
+            return body
+    return _first_nonempty_line(raw_response)
+
+
+def _build_fallback_inspector_report(
+    runtime_report: dict[str, Any],
+    error: Exception,
+) -> dict[str, Any]:
+    failure = runtime_report.get("failure")
+    failure_map = failure if isinstance(failure, dict) else {}
+    primary_frame = failure_map.get("primary_frame")
+    primary_frame_map = primary_frame if isinstance(primary_frame, dict) else {}
+    source = runtime_report.get("source")
+    source_map = source if isinstance(source, dict) else {}
+
+    raw_response = str(getattr(error, "raw_response", "") or "").strip()
+    exception_type = str(failure_map.get("exception_type") or "").strip()
+    exception_message = str(failure_map.get("exception_message") or "").strip()
+    focus_path = str(source_map.get("focus_path") or runtime_report.get("entrypoint") or "").strip()
+    line_number = primary_frame_map.get("line_number")
+    symbol_name = primary_frame_map.get("function")
+
+    supporting_evidence: list[str] = []
+    runtime_failure = ": ".join(part for part in (exception_type, exception_message) if part)
+    if runtime_failure:
+        supporting_evidence.append(f"Runtime failure: {runtime_failure}")
+    if focus_path:
+        if isinstance(line_number, int):
+            supporting_evidence.append(f"Primary failing location from runtime report: {focus_path}:{line_number}")
+        else:
+            supporting_evidence.append(f"Focused source path from runtime report: {focus_path}")
+    if raw_response:
+        supporting_evidence.append(
+            "Inspector model returned non-JSON prose; the raw model response is preserved in `raw_inspector_response`."
+        )
+
+    validation_ideas = [
+        "Re-run the original failing command and confirm the previous runtime error no longer occurs.",
+    ]
+    if exception_type:
+        validation_ideas.append(f"Confirm `{exception_type}` is no longer raised after the patch.")
+
+    root_cause_hint = _extract_root_cause_hint(raw_response)
+    if not root_cause_hint:
+        root_cause_hint = (
+            "Structured inspector parsing failed. Use the preserved raw inspector response and runtime evidence to infer the root cause."
+        )
+
+    return {
+        "summary": (
+            "Inspector model returned non-JSON output. A fallback structured report was created so planning and repair can continue."
+        ),
+        "root_cause": root_cause_hint,
+        "confidence": "low",
+        "primary_location": {
+            "path": focus_path or None,
+            "line": line_number if isinstance(line_number, int) else None,
+            "symbol": str(symbol_name).strip() if isinstance(symbol_name, str) and symbol_name.strip() else None,
+            "reason": (
+                "Derived from runtime failure evidence because the inspector response could not be parsed as JSON."
+            ),
+        },
+        "supporting_evidence": supporting_evidence or ["See `runtime_report` for the captured execution evidence."],
+        "fix_strategy": [
+            "Use the runtime report and any reliable details from the raw inspector response to form a minimal repair plan.",
+            "Verify the suspected root cause against exact source context before editing code.",
+        ],
+        "validation_ideas": validation_ideas,
+        "open_questions": [
+            "Some structured inspector fields may be incomplete because the model did not follow the JSON contract."
+        ],
+        "status": "fallback_non_json_response",
+        "parse_error": str(error),
+        "raw_inspector_response": raw_response,
+    }
+
 EventEmitter = Callable[[str, dict[str, Any]], None]
 
 
@@ -161,30 +302,12 @@ class PatchCandidateResult:
     rank: int = 0
 
 
-PATCH_CANDIDATE_PROFILES: tuple[PatchCandidateProfile, ...] = (
-    PatchCandidateProfile(
-        key="minimal_hotfix",
-        label="Minimal Hotfix Agent",
-        instructions=(
-            "Prioritize the smallest safe change that directly fixes the observed failure. "
-            "Avoid refactors and touch as few lines and files as possible."
-        ),
-    ),
-    PatchCandidateProfile(
-        key="root_cause_agent",
-        label="Root Cause Agent",
-        instructions=(
-            "Prioritize a durable fix for the underlying root cause, even if it requires a small helper change "
-            "or a narrowly scoped cross-file edit."
-        ),
-    ),
-    PatchCandidateProfile(
-        key="defensive_guard_agent",
-        label="Defensive Guard Agent",
-        instructions=(
-            "Prioritize resilience and edge-case handling around the failure path while keeping behavior changes small "
-            "and backwards compatible."
-        ),
+PATCH_GENERATION_PROFILE = PatchCandidateProfile(
+    key="repair_agent",
+    label="Repair Agent",
+    instructions=(
+        "Generate one minimal, correctness-focused patch that directly fixes the observed failure. "
+        "Avoid unnecessary refactors and keep the diff grounded in the original source context."
     ),
 )
 
@@ -644,19 +767,19 @@ def _apply_unified_diff_to_text(original_text: str, diff_text: str) -> str:
 
 
 def _collect_defined_symbol_names(code: str, filename: str) -> set[str]:
+    """Collect the names of top-level symbols that verification code must not overwrite.
+
+    Only function and class definitions are "protected": overriding one of them in the
+    verification block would silently change the subject under test and make the asserts
+    meaningless. Plain data variables (e.g. demo inputs like ``scores = [...]``) are
+    intentionally *not* protected - it is perfectly legitimate for the verification block
+    to rebind them with its own test inputs.
+    """
     tree = ast.parse(code, filename=filename)
     names: set[str] = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
-            continue
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    names.add(target.id)
-            continue
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            names.add(node.target.id)
     return names
 
 
@@ -711,7 +834,7 @@ def _normalize_verification_report(
     for node in ast.walk(sanitized_module):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id in existing_symbol_names:
             raise RuntimeError(
-                f"Verification code must not overwrite existing symbol `{node.id}`."
+                f"Verification code must not redefine function or class `{node.id}` from the patched source."
             )
 
     assert_count = sum(1 for node in ast.walk(sanitized_module) if isinstance(node, ast.Assert))
@@ -873,6 +996,9 @@ def _stream_explain(
     def on_chunk(chunk: str) -> None:
         emit("explain_chunk", {"stage": stage, "chunk": chunk})
 
+    def on_reasoning_chunk(chunk: str) -> None:
+        emit("stage_reasoning_chunk", {"stage": stage, "chunk": chunk})
+
     explain_text = call_llm_for_json(
         prompt=prompt,
         system_prompt=system_prompt,
@@ -880,10 +1006,53 @@ def _stream_explain(
         isJson=False,
         stream=True,
         stream_handler=on_chunk,
+        reasoning_handler=on_reasoning_chunk,
         audit_context=audit_context,
     )
     emit("explain_done", {"stage": stage, "text": explain_text})
     return explain_text
+
+
+def _stream_explain_async(
+    *,
+    stage: str,
+    prompt: str,
+    system_prompt: str,
+    model: str,
+    emit: EventEmitter,
+    audit_context: LLMCallContext | None = None,
+) -> threading.Thread:
+    """Run `_stream_explain` in a background thread so the next stage can start sooner.
+
+    The explain call produces a user-facing first-person summary that is not consumed by any
+    downstream stage, so pipelining it with the next stage's primary LLM call substantially
+    reduces the end-to-end wait time without changing functional behavior.
+
+    The worker always emits `stage/completed` for the stage when done, even on failure, so the
+    UI does not get stuck in an `explaining` state.
+    """
+
+    def worker() -> None:
+        try:
+            _stream_explain(
+                stage=stage,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=model,
+                emit=emit,
+                audit_context=audit_context,
+            )
+        except Exception as exc:
+            emit(
+                "explain_chunk",
+                {"stage": stage, "chunk": f"\n[explain skipped: {exc}]"},
+            )
+        finally:
+            _emit_stage(emit, stage, "completed")
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    return thread
 
 
 def _build_tool_event_handler(
@@ -907,6 +1076,31 @@ def _build_tool_event_handler(
         )
 
     return on_tool_event
+
+
+def _build_reasoning_event_handler(
+    emit: EventEmitter,
+    stage: str,
+    *,
+    candidate_label: str | None = None,
+) -> Callable[[str], None]:
+    did_emit_label = False
+
+    def on_reasoning_chunk(chunk: str) -> None:
+        nonlocal did_emit_label
+        next_chunk = chunk
+        if candidate_label and not did_emit_label:
+            next_chunk = f"[{candidate_label}]\n{chunk}"
+            did_emit_label = True
+        emit(
+            "stage_reasoning_chunk",
+            {
+                "stage": stage,
+                "chunk": next_chunk,
+            },
+        )
+
+    return on_reasoning_chunk
 
 
 def _count_diff_lines(git_diff: str) -> tuple[int, int]:
@@ -970,11 +1164,21 @@ def _build_candidate_generation_report(
     *,
     provisional_leader: PatchCandidateResult | None,
 ) -> str:
+    single_candidate_mode = len(candidates) == 1
     payload = {
-        "collaboration_mode": "multi_candidate_patch_committee",
+        "collaboration_mode": (
+            "single_patch_generation"
+            if single_candidate_mode
+            else "multi_candidate_patch_committee"
+        ),
         "selection_policy": (
-            "Specialized coder agents generated multiple patch candidates. "
-            "A later verification stage will execute, score, rank, and auto-select the best candidate."
+            "A single repair agent generated one patch candidate. "
+            "If the diff does not apply cleanly to the original project, generation is retried before verification."
+            if single_candidate_mode
+            else (
+                "Specialized coder agents generated multiple patch candidates. "
+                "A later verification stage will execute, score, rank, and auto-select the best candidate."
+            )
         ),
         "candidate_count": len(candidates),
         "provisional_leader": (
@@ -1056,9 +1260,195 @@ def _build_candidate_failure_message(candidates: list[PatchCandidateResult]) -> 
     for candidate in candidates:
         reason = candidate.error_message or "did not return a valid unified diff"
         details.append(f"{candidate.label}: {reason}")
+    if len(candidates) == 1:
+        if not details:
+            return "The repair agent failed to produce a valid patch."
+        return "The repair agent failed to produce a valid patch. " + " | ".join(details[:3])
     if not details:
         return "All coder agents failed to produce a valid patch candidate."
     return "All coder agents failed to produce a valid patch candidate. " + " | ".join(details[:6])
+
+
+def _reset_candidate_patch_state(candidate: PatchCandidateResult) -> None:
+    candidate.git_diff = ""
+    candidate.modified_files = []
+    candidate.changed_file_count = 0
+    candidate.added_lines = 0
+    candidate.removed_lines = 0
+    candidate.diff_line_count = 0
+    candidate.patched_files = {}
+
+
+def _populate_candidate_patch_state(
+    candidate: PatchCandidateResult,
+    *,
+    original_files: dict[str, str],
+    entrypoint: str,
+) -> None:
+    candidate.patched_files = _apply_unified_diff_to_project(
+        original_files,
+        candidate.git_diff,
+        default_path=entrypoint,
+    )
+    candidate.modified_files = sorted(
+        path
+        for path in set(original_files.keys()) | set(candidate.patched_files.keys())
+        if original_files.get(path) != candidate.patched_files.get(path)
+    )
+    candidate.changed_file_count = len(candidate.modified_files)
+    candidate.added_lines, candidate.removed_lines = _count_diff_lines(candidate.git_diff)
+    candidate.diff_line_count = candidate.added_lines + candidate.removed_lines
+
+
+def _should_retry_patch_generation(error_message: str) -> bool:
+    return any(marker in error_message for marker in RETRYABLE_PATCH_GENERATION_ERROR_MARKERS)
+
+
+def _build_patch_retry_instruction(error_message: str) -> str:
+    if "did not match the original code" in error_message:
+        return (
+            "The previous diff did not apply cleanly to the original project. Re-read the exact source "
+            "context and regenerate a fresh unified diff from the original files instead of editing the "
+            "failed diff."
+        )
+    if "Diff deletion did not match the original code." in error_message:
+        return (
+            "The previous diff deleted lines that do not exactly match the original project. Re-read the "
+            "source and regenerate a fresh unified diff against the original files."
+        )
+    return (
+        "The previous response was not a valid applicable unified diff. Return a fresh patch that follows "
+        "the required `diff --git`, `---`, `+++`, and `@@` structure against the original files only."
+    )
+
+
+def _generate_patch_candidate(
+    candidate: PatchCandidateResult,
+    *,
+    coder_prompt_payload: dict[str, Any],
+    original_files: dict[str, str],
+    entrypoint: str,
+    language: str,
+    model: str,
+    stage_tools: list[Any],
+    emit: EventEmitter,
+    make_llm_context: Callable[[str, str], LLMCallContext],
+) -> None:
+    previous_error = ""
+    previous_raw_output = ""
+
+    def on_diff_chunk(chunk: str) -> None:
+        emit("code_diff_chunk", {"stage": "code", "chunk": chunk})
+
+    for attempt in range(1, PATCH_GENERATION_MAX_ATTEMPTS + 1):
+        _reset_candidate_patch_state(candidate)
+        candidate.error_message = None
+        emit(
+            "candidate_status",
+            {
+                "stage": "code",
+                "candidate_key": candidate.key,
+                "candidate_label": candidate.label,
+                "status": "started" if attempt == 1 else "retrying",
+                "attempt": attempt,
+                "max_attempts": PATCH_GENERATION_MAX_ATTEMPTS,
+            },
+        )
+
+        prompt_payload = {
+            **coder_prompt_payload,
+            "collaboration_context": {
+                "mode": "single_patch_generation",
+                "candidate_key": candidate.key,
+                "candidate_label": candidate.label,
+                "candidate_instructions": candidate.instructions,
+                "attempt": attempt,
+                "max_attempts": PATCH_GENERATION_MAX_ATTEMPTS,
+            },
+        }
+        if previous_error:
+            prompt_payload["retry_context"] = {
+                "previous_error": previous_error,
+                "instruction": _build_patch_retry_instruction(previous_error),
+                "previous_failed_output_excerpt": previous_raw_output[:4000],
+            }
+
+        raw_diff = ""
+        try:
+            raw_diff = call_llm_for_json(
+                prompt=json.dumps(
+                    prompt_payload,
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                system_prompt=_render_code_system_prompt(language),
+                model=model,
+                isJson=False,
+                stream=attempt == 1,
+                stream_handler=on_diff_chunk if attempt == 1 else None,
+                tools=stage_tools,
+                reasoning_handler=_build_reasoning_event_handler(
+                    emit,
+                    "code",
+                    candidate_label=candidate.label,
+                ),
+                tool_event_handler=_build_tool_event_handler(
+                    emit,
+                    "code",
+                    candidate_label=candidate.label,
+                ),
+                audit_context=make_llm_context("code", f"code.diff.{candidate.key}.attempt_{attempt}"),
+            )
+            candidate.raw_output = raw_diff
+            candidate.git_diff = _coerce_model_output_to_diff(
+                raw_diff,
+                original_files=original_files,
+                entrypoint=entrypoint,
+                language=language,
+            )
+            _populate_candidate_patch_state(
+                candidate,
+                original_files=original_files,
+                entrypoint=entrypoint,
+            )
+            emit(
+                "candidate_status",
+                {
+                    "stage": "code",
+                    "candidate_key": candidate.key,
+                    "candidate_label": candidate.label,
+                    "status": "generated",
+                    "attempt": attempt,
+                    "changed_file_count": candidate.changed_file_count,
+                    "added_lines": candidate.added_lines,
+                    "removed_lines": candidate.removed_lines,
+                },
+            )
+            return
+        except Exception as exc:
+            candidate.raw_output = raw_diff
+            candidate.error_message = str(exc)
+            previous_error = candidate.error_message
+            previous_raw_output = raw_diff
+            _reset_candidate_patch_state(candidate)
+            will_retry = attempt < PATCH_GENERATION_MAX_ATTEMPTS and _should_retry_patch_generation(
+                candidate.error_message
+            )
+            emit(
+                "candidate_status",
+                {
+                    "stage": "code",
+                    "candidate_key": candidate.key,
+                    "candidate_label": candidate.label,
+                    "status": "failed",
+                    "attempt": attempt,
+                    "max_attempts": PATCH_GENERATION_MAX_ATTEMPTS,
+                    "error_message": candidate.error_message,
+                    "will_retry": will_retry,
+                },
+            )
+            if not will_retry:
+                return
 
 
 def run_repair_pipeline(
@@ -1147,32 +1537,43 @@ def run_repair_pipeline(
         )
 
         _emit_stage(emit, "inspect", "started")
-        inspector_report = call_llm_for_json(
-            prompt=json.dumps(runtime_report, ensure_ascii=False, indent=2),
-            system_prompt=_render_inspector_system_prompt(request.language),
-            model=request.model,
-            isJson=True,
-            tools=stage_tools,
-            tool_event_handler=_build_tool_event_handler(emit, "inspect"),
-            audit_context=make_llm_context("inspect", "inspect.report"),
-        )
+        try:
+            inspector_report = call_llm_for_json(
+                prompt=json.dumps(runtime_report, ensure_ascii=False, indent=2),
+                system_prompt=_render_inspector_system_prompt(request.language),
+                model=request.model,
+                isJson=True,
+                tools=stage_tools,
+                reasoning_handler=_build_reasoning_event_handler(emit, "inspect"),
+                tool_event_handler=_build_tool_event_handler(emit, "inspect"),
+                audit_context=make_llm_context("inspect", "inspect.report"),
+            )
+        except Exception as exc:
+            if not getattr(exc, "json_parse_failed", False):
+                raise
+            inspector_report = _build_fallback_inspector_report(runtime_report, exc)
         emit("inspect_report", {"stage": "inspect", "report": inspector_report})
-        _stream_explain(
-            stage="inspect",
-            prompt=json.dumps(
-                {
-                    "runtime_report": runtime_report,
-                    "inspector_report": inspector_report,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            system_prompt=INSPECT_EXPLAIN_SYSTEM_PROMPT,
-            model=request.model,
-            emit=emit,
-            audit_context=make_llm_context("inspect", "inspect.explain"),
+        # Kick off the inspect first-person summary in the background so the plan stage's
+        # primary LLM call can start immediately. The worker will emit `stage/completed`
+        # for inspect when the streaming summary finishes.
+        background_threads: list[threading.Thread] = []
+        background_threads.append(
+            _stream_explain_async(
+                stage="inspect",
+                prompt=json.dumps(
+                    {
+                        "runtime_report": runtime_report,
+                        "inspector_report": inspector_report,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                system_prompt=INSPECT_EXPLAIN_SYSTEM_PROMPT,
+                model=request.model,
+                emit=emit,
+                audit_context=make_llm_context("inspect", "inspect.explain"),
+            )
         )
-        _emit_stage(emit, "inspect", "completed")
 
         _emit_stage(emit, "plan", "started")
         planner_prompt = build_planner_prompt(inspector_report)
@@ -1182,26 +1583,28 @@ def run_repair_pipeline(
             model=request.model,
             isJson=False,
             tools=stage_tools,
+            reasoning_handler=_build_reasoning_event_handler(emit, "plan"),
             tool_event_handler=_build_tool_event_handler(emit, "plan"),
             audit_context=make_llm_context("plan", "plan.report"),
         )
         emit("plan_report", {"stage": "plan", "report": planner_report})
-        _stream_explain(
-            stage="plan",
-            prompt=json.dumps(
-                {
-                    "inspector_report": inspector_report,
-                    "planner_report": planner_report,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            system_prompt=PLAN_EXPLAIN_SYSTEM_PROMPT,
-            model=request.model,
-            emit=emit,
-            audit_context=make_llm_context("plan", "plan.explain"),
+        background_threads.append(
+            _stream_explain_async(
+                stage="plan",
+                prompt=json.dumps(
+                    {
+                        "inspector_report": inspector_report,
+                        "planner_report": planner_report,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                system_prompt=PLAN_EXPLAIN_SYSTEM_PROMPT,
+                model=request.model,
+                emit=emit,
+                audit_context=make_llm_context("plan", "plan.explain"),
+            )
         )
-        _emit_stage(emit, "plan", "completed")
 
         _emit_stage(emit, "code", "started")
 
@@ -1232,191 +1635,25 @@ def run_repair_pipeline(
             },
         }
 
-        patch_candidates: list[PatchCandidateResult] = []
-        for index, profile in enumerate(PATCH_CANDIDATE_PROFILES, start=1):
-            candidate = PatchCandidateResult(
-                index=index,
-                key=profile.key,
-                label=profile.label,
-                instructions=profile.instructions,
-            )
-            patch_candidates.append(candidate)
-            emit(
-                "candidate_status",
-                {
-                    "stage": "code",
-                    "candidate_key": candidate.key,
-                    "candidate_label": candidate.label,
-                    "status": "started",
-                },
-            )
-            try:
-                raw_diff = call_llm_for_json(
-                    prompt=json.dumps(
-                        {
-                            **coder_prompt_payload,
-                            "collaboration_context": {
-                                "mode": "multi_candidate_patch_committee",
-                                "candidate_key": candidate.key,
-                                "candidate_label": candidate.label,
-                                "candidate_instructions": candidate.instructions,
-                            },
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    system_prompt=_render_code_system_prompt(request.language),
-                    model=request.model,
-                    isJson=False,
-                    stream=False,
-                    tools=stage_tools,
-                    tool_event_handler=_build_tool_event_handler(
-                        emit,
-                        "code",
-                        candidate_label=candidate.label,
-                    ),
-                    audit_context=make_llm_context("code", f"code.diff.{candidate.key}"),
-                )
-                candidate.raw_output = raw_diff
-                candidate.git_diff = _coerce_model_output_to_diff(
-                    raw_diff,
-                    original_files=workspace.file_map,
-                    entrypoint=workspace.entrypoint,
-                    language=request.language,
-                )
-                candidate.patched_files = _apply_unified_diff_to_project(
-                    workspace.file_map,
-                    candidate.git_diff,
-                    default_path=workspace.entrypoint,
-                )
-                candidate.modified_files = sorted(
-                    path
-                    for path in set(workspace.file_map.keys()) | set(candidate.patched_files.keys())
-                    if workspace.file_map.get(path) != candidate.patched_files.get(path)
-                )
-                candidate.changed_file_count = len(candidate.modified_files)
-                candidate.added_lines, candidate.removed_lines = _count_diff_lines(candidate.git_diff)
-                candidate.diff_line_count = candidate.added_lines + candidate.removed_lines
-                emit(
-                    "candidate_status",
-                    {
-                        "stage": "code",
-                        "candidate_key": candidate.key,
-                        "candidate_label": candidate.label,
-                        "status": "generated",
-                        "changed_file_count": candidate.changed_file_count,
-                        "added_lines": candidate.added_lines,
-                        "removed_lines": candidate.removed_lines,
-                    },
-                )
-            except Exception as exc:
-                candidate.error_message = str(exc)
-                emit(
-                    "candidate_status",
-                    {
-                        "stage": "code",
-                        "candidate_key": candidate.key,
-                        "candidate_label": candidate.label,
-                        "status": "failed",
-                        "error_message": candidate.error_message,
-                    },
-                )
-
+        candidate = PatchCandidateResult(
+            index=1,
+            key=PATCH_GENERATION_PROFILE.key,
+            label=PATCH_GENERATION_PROFILE.label,
+            instructions=PATCH_GENERATION_PROFILE.instructions,
+        )
+        patch_candidates = [candidate]
+        _generate_patch_candidate(
+            candidate,
+            coder_prompt_payload=coder_prompt_payload,
+            original_files=workspace.file_map,
+            entrypoint=workspace.entrypoint,
+            language=request.language,
+            model=request.model,
+            stage_tools=stage_tools,
+            emit=emit,
+            make_llm_context=make_llm_context,
+        )
         valid_candidates = [candidate for candidate in patch_candidates if candidate.git_diff]
-        if not valid_candidates:
-            fallback_candidate = PatchCandidateResult(
-                index=len(patch_candidates) + 1,
-                key="single_agent_fallback",
-                label="Single Agent Fallback",
-                instructions=(
-                    "Retry patch generation with the original single-agent streaming path so the "
-                    "workflow can recover even if all specialized candidates fail."
-                ),
-            )
-            patch_candidates.append(fallback_candidate)
-            emit(
-                "candidate_status",
-                {
-                    "stage": "code",
-                    "candidate_key": fallback_candidate.key,
-                    "candidate_label": fallback_candidate.label,
-                    "status": "started",
-                },
-            )
-
-            def on_fallback_diff_chunk(chunk: str) -> None:
-                emit("code_diff_chunk", {"stage": "code", "chunk": chunk})
-
-            try:
-                fallback_raw_diff = call_llm_for_json(
-                    prompt=json.dumps(
-                        coder_prompt_payload,
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    system_prompt=_render_code_system_prompt(request.language),
-                    model=request.model,
-                    isJson=False,
-                    stream=True,
-                    stream_handler=on_fallback_diff_chunk,
-                    tools=stage_tools,
-                    tool_event_handler=_build_tool_event_handler(
-                        emit,
-                        "code",
-                        candidate_label=fallback_candidate.label,
-                    ),
-                    audit_context=make_llm_context("code", "code.diff.single_agent_fallback"),
-                )
-                fallback_candidate.raw_output = fallback_raw_diff
-                fallback_candidate.git_diff = _coerce_model_output_to_diff(
-                    fallback_raw_diff,
-                    original_files=workspace.file_map,
-                    entrypoint=workspace.entrypoint,
-                    language=request.language,
-                )
-                fallback_candidate.patched_files = _apply_unified_diff_to_project(
-                    workspace.file_map,
-                    fallback_candidate.git_diff,
-                    default_path=workspace.entrypoint,
-                )
-                fallback_candidate.modified_files = sorted(
-                    path
-                    for path in set(workspace.file_map.keys()) | set(fallback_candidate.patched_files.keys())
-                    if workspace.file_map.get(path) != fallback_candidate.patched_files.get(path)
-                )
-                fallback_candidate.changed_file_count = len(fallback_candidate.modified_files)
-                fallback_candidate.added_lines, fallback_candidate.removed_lines = _count_diff_lines(
-                    fallback_candidate.git_diff
-                )
-                fallback_candidate.diff_line_count = (
-                    fallback_candidate.added_lines + fallback_candidate.removed_lines
-                )
-                emit(
-                    "candidate_status",
-                    {
-                        "stage": "code",
-                        "candidate_key": fallback_candidate.key,
-                        "candidate_label": fallback_candidate.label,
-                        "status": "generated",
-                        "changed_file_count": fallback_candidate.changed_file_count,
-                        "added_lines": fallback_candidate.added_lines,
-                        "removed_lines": fallback_candidate.removed_lines,
-                    },
-                )
-            except Exception as exc:
-                fallback_candidate.error_message = str(exc)
-                emit(
-                    "candidate_status",
-                    {
-                        "stage": "code",
-                        "candidate_key": fallback_candidate.key,
-                        "candidate_label": fallback_candidate.label,
-                        "status": "failed",
-                        "error_message": fallback_candidate.error_message,
-                    },
-                )
-
-            valid_candidates = [candidate for candidate in patch_candidates if candidate.git_diff]
         if not valid_candidates:
             raise RuntimeError(_build_candidate_failure_message(patch_candidates))
 
@@ -1436,31 +1673,32 @@ def run_repair_pipeline(
                 ),
             },
         )
-        _stream_explain(
-            stage="code",
-            prompt=json.dumps(
-                {
-                    "planner_report": planner_report,
-                    "language": request.language,
-                    "candidate_generation_report": [
-                        _summarize_candidate(candidate)
-                        for candidate in patch_candidates
-                    ],
-                    "provisional_leader": {
-                        "candidate_key": provisional_leader.key,
-                        "candidate_label": provisional_leader.label,
-                        "git_diff": provisional_leader.git_diff,
+        background_threads.append(
+            _stream_explain_async(
+                stage="code",
+                prompt=json.dumps(
+                    {
+                        "planner_report": planner_report,
+                        "language": request.language,
+                        "candidate_generation_report": [
+                            _summarize_candidate(candidate)
+                            for candidate in patch_candidates
+                        ],
+                        "provisional_leader": {
+                            "candidate_key": provisional_leader.key,
+                            "candidate_label": provisional_leader.label,
+                            "git_diff": provisional_leader.git_diff,
+                        },
                     },
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            system_prompt=CODE_EXPLAIN_SYSTEM_PROMPT,
-            model=request.model,
-            emit=emit,
-            audit_context=make_llm_context("code", "code.explain"),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                system_prompt=CODE_EXPLAIN_SYSTEM_PROMPT,
+                model=request.model,
+                emit=emit,
+                audit_context=make_llm_context("code", "code.explain"),
+            )
         )
-        _emit_stage(emit, "code", "completed")
 
         _emit_stage(emit, "verify", "started")
 
@@ -1508,32 +1746,72 @@ def run_repair_pipeline(
                     ensure_ascii=False,
                     indent=2,
                 )
-                with materialize_patched_workspace(
-                    workspace.root_dir,
-                    candidate.patched_files,
-                    set(workspace.file_map.keys()),
-                ) as patched_root:
-                    candidate.patched_execution = run_project_safely(
-                        patched_root,
-                        filename=workspace.entrypoint,
-                        language=request.language,
-                        input_text=request.input_text,
-                        timeout_sec=request.timeout_sec,
-                    )
                 if request.language == "python":
-                    raw_verify_report = call_llm_for_json(
-                        prompt=verify_prompt,
-                        system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
-                        model=request.model,
-                        isJson=True,
-                        tools=verify_tools,
-                        tool_event_handler=_build_tool_event_handler(
-                            emit,
-                            "verify",
-                            candidate_label=candidate.label,
-                        ),
-                        audit_context=make_llm_context("verify", f"verify.report.{candidate.key}"),
+                    # Run the patched project reproduction and the verify LLM call in
+                    # parallel: neither depends on the other, so pipelining them saves a
+                    # roughly rerun-duration-long wait on every Python repair.
+                    patched_rerun_holder: dict[str, Any] = {}
+
+                    def _run_patched_rerun() -> None:
+                        try:
+                            with materialize_patched_workspace(
+                                workspace.root_dir,
+                                candidate.patched_files,
+                                set(workspace.file_map.keys()),
+                            ) as patched_root:
+                                patched_rerun_holder["execution"] = run_project_safely(
+                                    patched_root,
+                                    filename=workspace.entrypoint,
+                                    language=request.language,
+                                    input_text=request.input_text,
+                                    timeout_sec=request.timeout_sec,
+                                )
+                        except Exception as rerun_exc:  # noqa: BLE001
+                            patched_rerun_holder["error"] = rerun_exc
+
+                    patched_rerun_thread = threading.Thread(
+                        target=_run_patched_rerun,
+                        daemon=True,
                     )
+                    patched_rerun_thread.start()
+                    try:
+                        raw_verify_report = call_llm_for_json(
+                            prompt=verify_prompt,
+                            system_prompt=VERIFY_JSON_SYSTEM_PROMPT,
+                            model=request.model,
+                            isJson=True,
+                            tools=verify_tools,
+                            reasoning_handler=_build_reasoning_event_handler(
+                                emit,
+                                "verify",
+                                candidate_label=candidate.label,
+                            ),
+                            tool_event_handler=_build_tool_event_handler(
+                                emit,
+                                "verify",
+                                candidate_label=candidate.label,
+                            ),
+                            audit_context=make_llm_context("verify", f"verify.report.{candidate.key}"),
+                        )
+                    finally:
+                        patched_rerun_thread.join()
+                    if "error" in patched_rerun_holder:
+                        raise patched_rerun_holder["error"]
+                    candidate.patched_execution = patched_rerun_holder["execution"]
+                else:
+                    with materialize_patched_workspace(
+                        workspace.root_dir,
+                        candidate.patched_files,
+                        set(workspace.file_map.keys()),
+                    ) as patched_root:
+                        candidate.patched_execution = run_project_safely(
+                            patched_root,
+                            filename=workspace.entrypoint,
+                            language=request.language,
+                            input_text=request.input_text,
+                            timeout_sec=request.timeout_sec,
+                        )
+                if request.language == "python":
                     verification_base_source, skipped_verification_nodes = _build_verification_base_source(
                         candidate.patched_files.get(workspace.entrypoint, ""),
                         workspace.entrypoint,
@@ -1610,14 +1888,26 @@ def run_repair_pipeline(
 
         ranked_candidates = _rank_candidates(patch_candidates)
         selected_candidate = ranked_candidates[0]
+        single_candidate_mode = len(ranked_candidates) == 1
         verify_payload = {
-            "collaboration_mode": "multi_candidate_patch_committee",
+            "collaboration_mode": (
+                "single_patch_generation"
+                if single_candidate_mode
+                else "multi_candidate_patch_committee"
+            ),
             "selection_policy": (
-                "Candidates are ranked by patched runtime success, verification success, and patch size. "
-                + (
-                    "Python candidates also receive additional credit for assertion coverage."
-                    if request.language == "python"
-                    else "For non-Python languages the verification step uses patched runtime reruns."
+                (
+                    "A single repair agent generated one patch, and verification re-ran that patch before "
+                    "keeping the result."
+                )
+                if single_candidate_mode
+                else (
+                    "Candidates are ranked by patched runtime success, verification success, and patch size. "
+                    + (
+                        "Python candidates also receive additional credit for assertion coverage."
+                        if request.language == "python"
+                        else "For non-Python languages the verification step uses patched runtime reruns."
+                    )
                 )
             ),
             "candidate_count": len(ranked_candidates),
@@ -1632,21 +1922,24 @@ def run_repair_pipeline(
             "passed": selected_candidate.verify_passed,
         }
         emit("verify_report", {"stage": "verify", "report": verify_payload})
-        _stream_explain(
-            stage="verify",
-            prompt=json.dumps(
-                {
-                    "verification_report": verify_payload,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            system_prompt=VERIFY_EXPLAIN_SYSTEM_PROMPT,
-            model=request.model,
-            emit=emit,
-            audit_context=make_llm_context("verify", "verify.explain"),
+        # Stream the verify summary in the background too, so the user-facing "result" event
+        # (with the diff, ready for apply) arrives as soon as verification data is available.
+        background_threads.append(
+            _stream_explain_async(
+                stage="verify",
+                prompt=json.dumps(
+                    {
+                        "verification_report": verify_payload,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                system_prompt=VERIFY_EXPLAIN_SYSTEM_PROMPT,
+                model=request.model,
+                emit=emit,
+                audit_context=make_llm_context("verify", "verify.explain"),
+            )
         )
-        _emit_stage(emit, "verify", "completed")
 
         emit(
             "result",
@@ -1656,8 +1949,13 @@ def run_repair_pipeline(
                 "git_diff": selected_candidate.git_diff,
                 "verification_passed": selected_candidate.verify_passed,
                 "selection_summary": (
-                    f"Auto-selected {selected_candidate.label} from {len(ranked_candidates)} patch candidates "
-                    f"with score {selected_candidate.score}."
+                    f"Verified the patch generated by {selected_candidate.label} with score "
+                    f"{selected_candidate.score}."
+                    if len(ranked_candidates) == 1
+                    else (
+                        f"Auto-selected {selected_candidate.label} from {len(ranked_candidates)} patch "
+                        f"candidates with score {selected_candidate.score}."
+                    )
                 ),
                 "message": (
                     "Verification passed. Review the patch and decide whether to accept it."
@@ -1670,3 +1968,9 @@ def run_repair_pipeline(
                 ),
             },
         )
+
+        # Wait for every background explain thread to flush before the SSE stream closes,
+        # otherwise the sentinel in the API layer could be pushed while chunks are still
+        # being emitted to the queue.
+        for thread in background_threads:
+            thread.join()

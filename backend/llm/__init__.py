@@ -23,6 +23,7 @@ def call_llm_for_json(
     isJson: bool = True,
     stream: bool = False,
     stream_handler=None,
+    reasoning_handler=None,
     tools=None,
     tool_event_handler=None,
     audit_context: LLMCallContext | None = None,
@@ -49,6 +50,8 @@ def call_llm_for_json(
 
     if provider_code == "gemini":
         from backend.llm.call_gemini import call_llm_for_json as provider_call
+    elif is_ollama_like:
+        from backend.llm.call_ollama import call_llm_for_json as provider_call
     else:
         from backend.llm.call_gpt import call_llm_for_json as provider_call
 
@@ -91,6 +94,7 @@ def call_llm_for_json(
         "isJson": isJson,
         "stream": stream,
         "stream_handler": stream_handler,
+        "reasoning_handler": reasoning_handler,
         "tools": tools,
         "tool_event_handler": wrapped_tool_event_handler,
         "metadata_handler": on_provider_metadata,
@@ -106,24 +110,33 @@ def call_llm_for_json(
             kwargs["api_key"] = api_key
         if provider_code != "gemini" and runtime_model.api_base_url:
             kwargs["base_url"] = runtime_model.api_base_url
-        if provider_code != "gemini" and is_ollama_like:
-            kwargs["extra_body"] = {"think": thinking_enabled}
     if system_prompt is not None:
         kwargs["system_prompt"] = system_prompt
     try:
         result = provider_call(**kwargs)
     except Exception as exc:
+        raw_response_text = (
+            str(provider_metadata.get("raw_response_text"))
+            if provider_metadata.get("raw_response_text") is not None
+            else getattr(exc, "raw_response", None)
+        )
+        if raw_response_text:
+            try:
+                setattr(exc, "raw_response", raw_response_text)
+            except Exception:
+                pass
+        if not hasattr(exc, "json_parse_failed"):
+            try:
+                setattr(exc, "json_parse_failed", "not valid JSON" in str(exc))
+            except Exception:
+                pass
         if log_request_id is not None:
             finish_llm_request_log(
                 request_id=log_request_id,
                 started_monotonic=log_started_monotonic,
                 prompt=prompt,
                 system_prompt=system_prompt,
-                response_text=(
-                    str(provider_metadata.get("raw_response_text"))
-                    if provider_metadata.get("raw_response_text") is not None
-                    else None
-                ),
+                response_text=raw_response_text,
                 parsed_response=None,
                 provider_usage=provider_metadata.get("usage")
                 if isinstance(provider_metadata.get("usage"), dict)

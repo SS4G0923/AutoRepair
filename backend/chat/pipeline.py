@@ -108,10 +108,15 @@ def run_chat_pipeline(request: ChatRequest, emit: EventEmitter, *, user_id: int 
     )
 
     response_parts: list[str] = []
+    reasoning_parts: list[str] = []
 
     def on_chunk(chunk: str) -> None:
         response_parts.append(chunk)
         emit("chat_chunk", {"chunk": chunk})
+
+    def on_reasoning_chunk(chunk: str) -> None:
+        reasoning_parts.append(chunk)
+        emit("chat_reasoning_chunk", {"chunk": chunk})
 
     response_text = call_llm_for_json(
         prompt=_build_chat_prompt(request.messages),
@@ -120,6 +125,7 @@ def run_chat_pipeline(request: ChatRequest, emit: EventEmitter, *, user_id: int 
         isJson=False,
         stream=True,
         stream_handler=on_chunk,
+        reasoning_handler=on_reasoning_chunk,
         audit_context=LLMCallContext(
             user_id=user_id,
             history_id=request.history_id,
@@ -135,4 +141,11 @@ def run_chat_pipeline(request: ChatRequest, emit: EventEmitter, *, user_id: int 
     if not final_text:
         raise RuntimeError("Chat model returned an empty response.")
 
-    emit("result", {"message": final_text, "model": request.model})
+    emit(
+        "result",
+        {
+            "message": final_text,
+            "reasoning": "".join(reasoning_parts).strip(),
+            "model": request.model,
+        },
+    )

@@ -31,6 +31,7 @@ export function useChatSession({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatThinking, setChatThinking] = useState(false);
+  const [chatReasoningStreaming, setChatReasoningStreaming] = useState("");
   const [chatStreamingText, setChatStreamingText] = useState("");
   const [chatError, setChatError] = useState("");
 
@@ -53,6 +54,7 @@ export function useChatSession({
     setChatMessages([]);
     setChatInput("");
     setChatThinking(false);
+    setChatReasoningStreaming("");
     setChatStreamingText("");
     setChatError("");
   }
@@ -77,6 +79,7 @@ export function useChatSession({
     setChatMessages((current) => [...current, userMessage]);
     setChatInput("");
     setChatThinking(true);
+    setChatReasoningStreaming("");
     setChatStreamingText("");
     setChatError("");
 
@@ -114,6 +117,7 @@ export function useChatSession({
       const decoder = new TextDecoder();
       let buffer = "";
       let finalMessage = "";
+      let finalReasoning = "";
       let returnedHistoryId: number | null = null;
 
       while (true) {
@@ -136,12 +140,20 @@ export function useChatSession({
               finalMessage += chunk;
               setChatStreamingText((current) => current + chunk);
             }
+          } else if (parsed.event === "chat_reasoning_chunk") {
+            const chunk = String(parsed.data.chunk ?? "");
+            if (chunk) {
+              finalReasoning += chunk;
+              setChatReasoningStreaming((current) => current + chunk);
+            }
           } else if (parsed.event === "result") {
             finalMessage = String(parsed.data.message ?? finalMessage);
+            finalReasoning = String(parsed.data.reasoning ?? finalReasoning);
             if (typeof parsed.data.history_id === "number") {
               returnedHistoryId = Number(parsed.data.history_id);
             }
             setChatStreamingText(finalMessage);
+            setChatReasoningStreaming(finalReasoning);
           } else if (parsed.event === "error") {
             throw new Error(String(parsed.data.message ?? "Chat request failed."));
           }
@@ -156,12 +168,20 @@ export function useChatSession({
             finalMessage += chunk;
             setChatStreamingText((current) => current + chunk);
           }
+        } else if (parsed.event === "chat_reasoning_chunk") {
+          const chunk = String(parsed.data.chunk ?? "");
+          if (chunk) {
+            finalReasoning += chunk;
+            setChatReasoningStreaming((current) => current + chunk);
+          }
         } else if (parsed.event === "result") {
           finalMessage = String(parsed.data.message ?? finalMessage);
+          finalReasoning = String(parsed.data.reasoning ?? finalReasoning);
           if (typeof parsed.data.history_id === "number") {
             returnedHistoryId = Number(parsed.data.history_id);
           }
           setChatStreamingText(finalMessage);
+          setChatReasoningStreaming(finalReasoning);
         } else if (parsed.event === "error") {
           throw new Error(String(parsed.data.message ?? "Chat request failed."));
         }
@@ -176,9 +196,11 @@ export function useChatSession({
         id: `${Date.now()}-assistant`,
         role: "assistant",
         content: cleanedMessage,
+        reasoning: finalReasoning.trim() || undefined,
         at: formatTimestamp(),
       };
       setChatMessages((current) => [...current, assistantMessage]);
+      setChatReasoningStreaming("");
       setChatStreamingText("");
 
       if (returnedHistoryId) {
@@ -201,6 +223,7 @@ export function useChatSession({
         return;
       }
       setChatError(error instanceof Error ? error.message : String(error));
+      setChatReasoningStreaming("");
       setChatStreamingText("");
     } finally {
       setChatThinking(false);
@@ -217,11 +240,13 @@ export function useChatSession({
         id: `history-${historyId}-${index}`,
         role: message.role,
         content: message.content,
+        reasoning: typeof message.reasoning === "string" ? message.reasoning : undefined,
         at: message.at,
       })),
     );
     setChatInput("");
     setChatThinking(false);
+    setChatReasoningStreaming("");
     setChatStreamingText("");
     setChatError("");
   }
@@ -231,6 +256,7 @@ export function useChatSession({
     chatMessages,
     chatInput,
     chatThinking,
+    chatReasoningStreaming,
     chatStreamingText,
     chatError,
     setChatInput,

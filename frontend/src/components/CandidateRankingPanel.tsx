@@ -38,10 +38,14 @@ interface CandidateRankingPanelProps {
 
 const uiCopy = {
   en: {
-    headingCode: "Patch Committee",
-    headingVerify: "Patch Ranking",
-    subheadingCode: "Multiple coder agents generated candidate patches before verification.",
-    subheadingVerify: "Candidates were verified, scored, ranked, and auto-selected.",
+    headingCodeMulti: "Patch Committee",
+    headingVerifyMulti: "Patch Ranking",
+    subheadingCodeMulti: "Multiple coder agents generated candidate patches before verification.",
+    subheadingVerifyMulti: "Candidates were verified, scored, ranked, and auto-selected.",
+    headingCodeSingle: "Generated Patch",
+    headingVerifySingle: "Patch Verification",
+    subheadingCodeSingle: "A single repair agent generated the current patch.",
+    subheadingVerifySingle: "The generated patch was verified and kept as the final result.",
     selected: "Selected",
     provisional: "Provisional Leader",
     score: "Score",
@@ -57,10 +61,14 @@ const uiCopy = {
     generated: "Generated",
   },
   zh: {
-    headingCode: "候选 Patch 委员会",
-    headingVerify: "候选 Patch 排名",
-    subheadingCode: "多个 coder agent 先生成候选 patch，再进入自动验证。",
-    subheadingVerify: "系统已自动验证、打分、排序，并选出最优方案。",
+    headingCodeMulti: "候选 Patch 委员会",
+    headingVerifyMulti: "候选 Patch 排名",
+    subheadingCodeMulti: "多个 coder agent 先生成候选 patch，再进入自动验证。",
+    subheadingVerifyMulti: "系统已自动验证、打分、排序，并选出最优方案。",
+    headingCodeSingle: "Patch 生成结果",
+    headingVerifySingle: "Patch 验证结果",
+    subheadingCodeSingle: "系统仅使用一个 repair agent 生成当前 patch。",
+    subheadingVerifySingle: "系统已对当前 patch 完成自动验证。",
     selected: "已选中",
     provisional: "临时领先",
     score: "得分",
@@ -82,7 +90,8 @@ function parseCandidateReport(reportContent: string): CandidateReportPayload | n
     const parsed = JSON.parse(reportContent) as CandidateReportPayload;
     if (
       parsed &&
-      parsed.collaboration_mode === "multi_candidate_patch_committee" &&
+      (parsed.collaboration_mode === "multi_candidate_patch_committee" ||
+        parsed.collaboration_mode === "single_patch_generation") &&
       (Array.isArray(parsed.candidates) || Array.isArray(parsed.ranked_candidates))
     ) {
       return parsed;
@@ -91,6 +100,10 @@ function parseCandidateReport(reportContent: string): CandidateReportPayload | n
     return null;
   }
   return null;
+}
+
+export function isCandidateReportContent(reportContent: string) {
+  return parseCandidateReport(reportContent) !== null;
 }
 
 function badgeClass(kind: "selected" | "passed" | "failed" | "default") {
@@ -127,11 +140,28 @@ export function CandidateRankingPanel({
   }
 
   const dict = uiCopy[locale];
+  const isMultiCandidateMode = report.collaboration_mode === "multi_candidate_patch_committee";
   const cards = (stage === "verify" ? report.ranked_candidates : report.candidates) ?? [];
   const highlightKey =
     stage === "verify"
       ? report.selected_candidate?.candidate_key
       : report.provisional_leader?.candidate_key;
+  const heading =
+    stage === "verify"
+      ? isMultiCandidateMode
+        ? dict.headingVerifyMulti
+        : dict.headingVerifySingle
+      : isMultiCandidateMode
+        ? dict.headingCodeMulti
+        : dict.headingCodeSingle;
+  const subheading =
+    stage === "verify"
+      ? isMultiCandidateMode
+        ? dict.subheadingVerifyMulti
+        : dict.subheadingVerifySingle
+      : isMultiCandidateMode
+        ? dict.subheadingCodeMulti
+        : dict.subheadingCodeSingle;
 
   return (
     <div className="space-y-3">
@@ -139,10 +169,10 @@ export function CandidateRankingPanel({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-slate-900 dark:text-white">
-              {stage === "verify" ? dict.headingVerify : dict.headingCode}
+              {heading}
             </div>
             <div className="mt-1 text-sm text-slate-600 dark:text-white/60">
-              {stage === "verify" ? dict.subheadingVerify : dict.subheadingCode}
+              {subheading}
             </div>
             {report.selection_policy ? (
               <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-white/45">
@@ -150,7 +180,7 @@ export function CandidateRankingPanel({
               </div>
             ) : null}
           </div>
-          {highlightKey ? (
+          {isMultiCandidateMode && highlightKey ? (
             <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-medium ${badgeClass("selected")}`}>
               {stage === "verify" ? dict.selected : dict.provisional}
             </span>
@@ -162,6 +192,7 @@ export function CandidateRankingPanel({
         {cards.map((candidate, index) => {
           const candidateKey = candidate.candidate_key || `candidate-${index + 1}`;
           const highlighted = candidateKey === highlightKey;
+          const useSelectedStyling = isMultiCandidateMode && highlighted;
           const statusLabel =
             candidate.verify_passed === true
               ? dict.passed
@@ -169,7 +200,7 @@ export function CandidateRankingPanel({
                 ? dict.failed
                 : dict.generated;
           const statusKind =
-            highlighted
+            useSelectedStyling
               ? "selected"
               : candidate.verify_passed === true
                 ? "passed"
@@ -181,7 +212,7 @@ export function CandidateRankingPanel({
             <div
               key={candidateKey}
               className={`rounded-[24px] border p-4 ${
-                highlighted
+                useSelectedStyling
                   ? "border-slate-900/15 bg-slate-900/[0.04] dark:border-white/15 dark:bg-white/[0.05]"
                   : "border-black/5 bg-black/[0.02] dark:border-white/10 dark:bg-white/[0.02]"
               }`}
@@ -189,7 +220,7 @@ export function CandidateRankingPanel({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    {candidate.rank ? (
+                    {isMultiCandidateMode && candidate.rank ? (
                       <span className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:border-white/10 dark:text-white/65">
                         #{candidate.rank}
                       </span>

@@ -83,5 +83,20 @@ div::-webkit-scrollbar-track {
 }
 
 .chat-thinking-glint {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(148, 163, 184, 0.08) 22%,
+    rgba(255, 255, 255, 0.9) 46%,
+    rgba(125, 211, 252, 0.28) 54%,
+    rgba(148, 163, 184, 0.1) 76%,
+    transparent 100%
+  );
+  filter: blur(0.5px);
   animation: chat-thinking-glint 1.8s ease-in-out infinite;
+}
+
+html.dark .chat-thinking-glint {
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.24) 50%, transparent 100%);
+  filter: none;
 }

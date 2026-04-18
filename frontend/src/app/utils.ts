@@ -16,11 +16,11 @@ export const MAX_SIDEBAR_WIDTH = 560;
 export const STAGE_NAMES: StageName[] = ["run", "inspect", "plan", "code", "verify"];
 
 export const createStageState = (): Record<StageName, StageState> => ({
-  run: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
-  inspect: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
-  plan: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
-  code: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
-  verify: { status: "idle", explain: "", report: "", diff: "", toolEvents: [] },
+  run: { status: "idle", reasoning: "", explain: "", report: "", diff: "", toolEvents: [] },
+  inspect: { status: "idle", reasoning: "", explain: "", report: "", diff: "", toolEvents: [] },
+  plan: { status: "idle", reasoning: "", explain: "", report: "", diff: "", toolEvents: [] },
+  code: { status: "idle", reasoning: "", explain: "", report: "", diff: "", toolEvents: [] },
+  verify: { status: "idle", reasoning: "", explain: "", report: "", diff: "", toolEvents: [] },
 });
 
 export function formatTimestamp() {
@@ -75,6 +75,12 @@ export function buildSummary(event: string, data: Record<string, unknown>) {
   if (event === "tool_event") {
     return `${String(data.stage)} · ${String(data.tool_name)} · ${String(data.status)}`;
   }
+  if (event === "stage_reasoning_chunk") {
+    return `${String(data.stage)} · reasoning`;
+  }
+  if (event === "chat_reasoning_chunk") {
+    return "chat · reasoning";
+  }
   if (event === "error") {
     return "error";
   }
@@ -122,6 +128,7 @@ export function normalizeStageMap(
     }
     base[stage] = {
       status: next.status ?? base[stage].status,
+      reasoning: next.reasoning ?? base[stage].reasoning,
       explain: next.explain ?? base[stage].explain,
       report: next.report ?? base[stage].report,
       diff: next.diff ?? base[stage].diff,
