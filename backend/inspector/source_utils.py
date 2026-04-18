@@ -26,29 +26,57 @@ class ResolvedSource:
     source_file: Path
     confidence: float
     reason: str
+    is_test: bool = False
 
 
 class SourceIndex:
     """
     Index source roots for fast resolution by file name.
-    Supports multiple src roots (dir.src.classes + dir.src.tests, etc.).
+
+    Separates production roots (``src_roots``) and test roots (``test_roots``)
+    so downstream code can tell whether a resolved path lives in ``src/main``
+    or ``src/test``. Tests are indexed too so that test-frame resolution still
+    works for explanatory purposes, but production paths are always preferred
+    when both exist and the caller flags ``prefer_production``.
     """
 
-    def __init__(self, src_roots: Iterable[Path]):
+    def __init__(
+        self,
+        src_roots: Iterable[Path],
+        test_roots: Iterable[Path] = (),
+    ):
         self.src_roots = [p.resolve() for p in src_roots]
-        self._by_filename: dict[str, list[Path]] = {}
+        self.test_roots = [p.resolve() for p in test_roots]
+        # Each entry is (path, is_test).
+        self._by_filename: dict[str, list[tuple[Path, bool]]] = {}
 
     def build(self) -> None:
-        by_fn: dict[str, list[Path]] = {}
+        by_fn: dict[str, list[tuple[Path, bool]]] = {}
         for root in self.src_roots:
             if not root.exists():
                 continue
             for p in root.rglob("*.java"):
-                by_fn.setdefault(p.name, []).append(p.resolve())
+                by_fn.setdefault(p.name, []).append((p.resolve(), False))
+        for root in self.test_roots:
+            if not root.exists():
+                continue
+            for p in root.rglob("*.java"):
+                by_fn.setdefault(p.name, []).append((p.resolve(), True))
         self._by_filename = by_fn
 
     def candidates_for_filename(self, file_name: str) -> list[Path]:
-        return list(self._by_filename.get(file_name, []))
+        # Backward-compatible: returns paths only (production first).
+        return [p for p, _ in self._entries_for_filename(file_name)]
+
+    def _entries_for_filename(self, file_name: str) -> list[tuple[Path, bool]]:
+        entries = list(self._by_filename.get(file_name, []))
+        # Stable production-first ordering.
+        entries.sort(key=lambda e: (e[1], str(e[0])))
+        return entries
+
+    def production_filename_exists(self, file_name: str) -> bool:
+        """Does ``file_name`` exist under a production src root?"""
+        return any(not is_test for _, is_test in self._by_filename.get(file_name, []))
 
 
 def _package_path_tokens(class_name: str) -> list[str]:
@@ -69,39 +97,73 @@ def resolve_source_for_frame(
     index: SourceIndex,
     frame_class_name: str,
     file_name: str,
+    *,
+    prefer_production: bool = True,
 ) -> Optional[ResolvedSource]:
     """
-    Resolve source file path based on file name + class name package hint.
-    If multiple matches exist, pick best by matching package tokens with path.
+    Resolve a stack frame's source file, preferring production over test roots.
+
+    Production is preferred because test files are almost never the correct
+    repair target, and stack traces frequently contain test frames that share
+    a simple name with a real production class (rare but possible with helper
+    files). When only test candidates exist we still return one so callers can
+    inspect the frame, but flag ``is_test=True`` so ranking logic can penalise
+    it or defer to metadata-based fallbacks.
     """
-    cands = index.candidates_for_filename(file_name)
-    if not cands:
+    entries = index._entries_for_filename(file_name)
+    if not entries:
         return None
-    if len(cands) == 1:
-        return ResolvedSource(cands[0], confidence=0.9, reason="unique_filename_match")
+
+    prod_entries = [(p, t) for p, t in entries if not t]
+    test_entries = [(p, t) for p, t in entries if t]
+    pool = prod_entries if prefer_production and prod_entries else entries
+    is_test_pool = not prod_entries  # only true when we fell back to tests
+
+    if len(pool) == 1:
+        path, is_test = pool[0]
+        reason = (
+            "unique_production_match"
+            if not is_test
+            else "unique_test_match"
+        )
+        return ResolvedSource(path, confidence=0.9, reason=reason, is_test=is_test)
 
     pkg_tokens = _package_path_tokens(frame_class_name)
     if not pkg_tokens:
-        return ResolvedSource(cands[0], confidence=0.5, reason="multiple_matches_no_package_hint")
+        path, is_test = pool[0]
+        return ResolvedSource(
+            path,
+            confidence=0.5,
+            reason="multiple_matches_no_package_hint",
+            is_test=is_test,
+        )
 
-    best = None
+    best: tuple[Path, bool] | None = None
     best_score = -1
-    for p in cands:
-        parts = [x for x in p.parts]
-        # score how many package tokens appear in-order in the path
-        score = 0
-        for tok in pkg_tokens:
-            if tok in parts:
-                score += 1
+    for path, is_test in pool:
+        parts = list(path.parts)
+        score = sum(1 for tok in pkg_tokens if tok in parts)
         if score > best_score:
             best_score = score
-            best = p
+            best = (path, is_test)
 
     if best is None:
-        return ResolvedSource(cands[0], confidence=0.4, reason="fallback_first_match")
+        path, is_test = pool[0]
+        return ResolvedSource(
+            path,
+            confidence=0.4,
+            reason="fallback_first_match",
+            is_test=is_test,
+        )
 
     conf = 0.6 + min(0.3, 0.03 * best_score)
-    return ResolvedSource(best, confidence=conf, reason=f"package_path_match(score={best_score})")
+    path, is_test = best
+    return ResolvedSource(
+        path,
+        confidence=conf,
+        reason=f"package_path_match(score={best_score})",
+        is_test=is_test or is_test_pool,
+    )
 
 
 def extract_code_snippet(

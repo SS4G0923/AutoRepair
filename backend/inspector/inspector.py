@@ -10,6 +10,7 @@ from backend.inspector.stacktrace_filter import (
     build_evidence_from_log,
     choose_best_frame,
     filter_and_rank_frames,
+    is_test_frame,
 )
 from backend.inspector.source_utils import (
     SourceIndex,
@@ -84,14 +85,17 @@ def run_defects4j_inspection(
     except Defects4JError as e:
         raise
 
-    src_roots = []
+    prod_roots: list[Path] = []
+    test_roots: list[Path] = []
     if src_classes_rel:
-        src_roots.append((work_dir / src_classes_rel).resolve())
+        prod_roots.append((work_dir / src_classes_rel).resolve())
     if src_tests_rel:
-        src_roots.append((work_dir / src_tests_rel).resolve())
+        test_roots.append((work_dir / src_tests_rel).resolve())
 
-    # Build file index (fast resolution by file name)
-    index = SourceIndex(src_roots)
+    # Build file index (fast resolution by file name). We keep production and
+    # test roots separate so scoring can avoid rewarding test frames with the
+    # "source_exists" bonus.
+    index = SourceIndex(prod_roots, test_roots=test_roots)
     index.build()
 
     # 3) compile
@@ -156,13 +160,28 @@ def run_defects4j_inspection(
             resolved = resolve_source_for_frame(index, frame.class_name, frame.file_name)
             return bool(resolved and resolved.source_file.exists())
 
-        ranked = filter_and_rank_frames(evidence, source_exists_fn=source_exists_fn, max_candidates=max_candidates)
+        def source_is_test_fn(frame) -> bool:
+            resolved = resolve_source_for_frame(index, frame.class_name, frame.file_name)
+            return bool(resolved and resolved.is_test)
+
+        ranked = filter_and_rank_frames(
+            evidence,
+            source_exists_fn=source_exists_fn,
+            source_is_test_fn=source_is_test_fn,
+            max_candidates=max_candidates,
+        )
         best = choose_best_frame(ranked)
 
         suspects: list[dict[str, Any]] = []
         for s in ranked[: min(len(ranked), 3)]:
             res = resolve_source_for_frame(index, s.frame.class_name, s.frame.file_name)
             if not res:
+                continue
+            # Extra safety net: even if a frame survives ranking, skip it here
+            # if the only resolved path points at a test file. `ranked` should
+            # already have excluded these via source_is_test_fn, but keeping
+            # this guard makes the suspect list bulletproof.
+            if res.is_test:
                 continue
             snippet = extract_code_snippet(res.source_file, s.frame.line_number, window=8)
             method_ctx = extract_enclosing_method(res.source_file, s.frame.line_number)
@@ -178,8 +197,23 @@ def run_defects4j_inspection(
                     "score_reasons": s.reasons,
                     "snippet": snippet,
                     "enclosing_method": method_ctx,
+                    "is_test_source": res.is_test,  # always False here
                 }
             )
+
+        # Signal for downstream: did we actually recover any production-level
+        # frame? When this is False, callers should escalate to metadata-based
+        # localisation (e.g. Defects4J `classes.modified`) instead of trusting
+        # the suspect list.
+        has_production_frame = bool(suspects)
+        coverage_note: str | None = None
+        if not has_production_frame:
+            if any(is_test_frame(fr) for fr in evidence.frames):
+                coverage_note = "only_test_or_framework_frames_in_stack"
+            elif not evidence.frames:
+                coverage_note = "no_frames_parsed_from_log"
+            else:
+                coverage_note = "no_production_frame_recovered"
 
         detailed_failures.append(
             {
@@ -189,6 +223,8 @@ def run_defects4j_inspection(
                 "raw_log_artifact": f"single_test_{i}.stdout.txt + single_test_{i}.stderr.txt",
                 "evidence_source": evidence_source,
                 "evidence_excerpt": evidence_excerpt,
+                "has_production_frame": has_production_frame,
+                "coverage_note": coverage_note,
                 "ranked_candidates": [
                     {
                         "class_name": s.frame.class_name,

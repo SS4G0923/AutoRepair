@@ -38,6 +38,289 @@ interface BenchmarkWorkspaceProps {
   workspaceMainClass: string;
 }
 
+const FULL_REPAIR_STAGES: Array<{ key: string; labelKey: keyof AppCopy }> = [
+  { key: "checkout", labelKey: "benchmarkStageCheckout" },
+  { key: "inspect", labelKey: "benchmarkStageInspect" },
+  { key: "generate_patch", labelKey: "benchmarkStageGeneratePatch" },
+  { key: "apply_patch", labelKey: "benchmarkStageApplyPatch" },
+  { key: "recompile", labelKey: "benchmarkStageRecompile" },
+  { key: "retest", labelKey: "benchmarkStageRetest" },
+  { key: "completed", labelKey: "benchmarkStageCompleted" },
+];
+
+const SIMPLE_STAGES: Array<{ key: string; labelKey: keyof AppCopy }> = [
+  { key: "checkout", labelKey: "benchmarkStageCheckout" },
+  { key: "inspect", labelKey: "benchmarkStageInspect" },
+  { key: "completed", labelKey: "benchmarkStageCompleted" },
+];
+
+function BenchmarkStageStepper({
+  copy,
+  stage,
+  runMode,
+  runStatus,
+}: {
+  copy: AppCopy;
+  stage: string | null;
+  runMode: string;
+  runStatus: string;
+}) {
+  const stages = runMode === "full_repair" ? FULL_REPAIR_STAGES : SIMPLE_STAGES;
+  const normalized = (stage || "").toLowerCase();
+  const finished = runStatus === "completed";
+  const failed = runStatus === "failed";
+  let activeIdx = stages.findIndex((s) => s.key === normalized);
+  if (activeIdx < 0 && finished) activeIdx = stages.length - 1;
+  if (activeIdx < 0) activeIdx = 0;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {stages.map((entry, idx) => {
+        const isDone = idx < activeIdx || finished;
+        const isActive = idx === activeIdx && !finished && !failed;
+        const isFailed = failed && idx === activeIdx;
+        const tone = isFailed
+          ? "bg-rose-500/15 text-rose-600 ring-rose-500/40 dark:text-rose-300"
+          : isActive
+            ? "bg-sky-500/15 text-sky-700 ring-sky-500/50 dark:text-sky-300 bench-stage-active"
+            : isDone
+              ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300"
+              : "bg-black/[0.04] text-slate-500 ring-black/5 dark:bg-white/[0.05] dark:text-white/40 dark:ring-white/10";
+        return (
+          <div key={entry.key} className="flex items-center gap-1.5">
+            <div
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 transition ${tone}`}
+            >
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full ${
+                  isActive
+                    ? "bg-sky-500 bench-pulse-dot"
+                    : isDone
+                      ? "bg-emerald-500"
+                      : isFailed
+                        ? "bg-rose-500"
+                        : "bg-slate-400/60 dark:bg-white/30"
+                }`}
+              />
+              {copy[entry.labelKey]}
+            </div>
+            {idx < stages.length - 1 ? (
+              <span
+                className={`h-px w-4 ${
+                  isDone
+                    ? "bg-emerald-500/50"
+                    : isActive
+                      ? "bg-sky-500/40"
+                      : "bg-black/10 dark:bg-white/15"
+                }`}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type AttemptOutcome =
+  | "passed"
+  | "tests_still_failing"
+  | "compile_failed"
+  | "apply_failed"
+  | "llm_invalid_json"
+  | string;
+
+interface RepairAttempt {
+  round: number;
+  outcome: AttemptOutcome;
+  remaining_failing?: string[];
+  regressions?: string[];
+  test_stdout_tail?: string;
+  compile_error_tail?: string;
+  apply_error?: string;
+  llm_error?: string;
+  llm_raw_preview?: string;
+}
+
+function outcomeTone(outcome: AttemptOutcome): string {
+  if (outcome === "passed")
+    return "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300";
+  if (
+    outcome === "compile_failed" ||
+    outcome === "apply_failed" ||
+    outcome === "llm_invalid_json"
+  )
+    return "bg-rose-500/10 text-rose-700 ring-rose-500/30 dark:text-rose-300";
+  return "bg-amber-500/10 text-amber-700 ring-amber-500/30 dark:text-amber-300";
+}
+
+function outcomeLabel(outcome: AttemptOutcome, copy: AppCopy): string {
+  switch (outcome) {
+    case "passed":
+      return copy.benchmarkAttemptOutcomePassed;
+    case "compile_failed":
+      return copy.benchmarkAttemptOutcomeCompileFail;
+    case "apply_failed":
+      return copy.benchmarkAttemptOutcomeApplyFail;
+    case "tests_still_failing":
+      return copy.benchmarkAttemptOutcomeTestsFail;
+    case "llm_invalid_json":
+      return copy.benchmarkAttemptOutcomeInvalidJson;
+    default:
+      return outcome;
+  }
+}
+
+function RepairAttemptsPanel({
+  copy,
+  report,
+}: {
+  copy: AppCopy;
+  report: Record<string, unknown> | null | undefined;
+}) {
+  const attemptsRaw = report && (report as Record<string, unknown>).attempts;
+  if (!Array.isArray(attemptsRaw) || attemptsRaw.length === 0) return null;
+  const attempts = attemptsRaw as RepairAttempt[];
+  const maxRounds = (report as Record<string, unknown>).max_rounds;
+  const bestRoundRaw = (report as Record<string, unknown>).best_round;
+  const bestRound = typeof bestRoundRaw === "number" ? bestRoundRaw : null;
+  return (
+    <div className="mt-3 rounded-2xl border border-black/5 bg-black/[0.02] p-3 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="flex items-baseline justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold text-slate-700 dark:text-white/80">
+            {copy.benchmarkAttemptsTitle}
+            {typeof maxRounds === "number" ? (
+              <span className="ml-1.5 font-normal text-slate-500 dark:text-white/50">
+                · {attempts.length} / {maxRounds}
+              </span>
+            ) : null}
+          </div>
+          <div className="text-[11px] text-slate-500 dark:text-white/50">
+            {copy.benchmarkAttemptsSubtitle}
+          </div>
+          {bestRound !== null ? (
+            <div className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300">
+              {copy.benchmarkAttemptBestRoundHint.replace("{n}", String(bestRound))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <ol className="mt-2 space-y-2">
+        {attempts.map((attempt) => {
+          const isBest = bestRound !== null && attempt.round === bestRound;
+          return (
+            <li
+              key={attempt.round}
+              className={`rounded-xl border p-2.5 ${
+                isBest
+                  ? "border-emerald-400/40 bg-emerald-50/60 dark:border-emerald-300/30 dark:bg-emerald-500/10"
+                  : "border-black/5 bg-white/70 dark:border-white/10 dark:bg-white/[0.03]"
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-white/10 dark:text-white/80">
+                  {copy.benchmarkAttemptRound} #{attempt.round}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${outcomeTone(
+                    attempt.outcome,
+                  )}`}
+                >
+                  {outcomeLabel(attempt.outcome, copy)}
+                </span>
+                {isBest ? (
+                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
+                    ★ {copy.benchmarkAttemptBestRoundBadge}
+                  </span>
+                ) : null}
+              </div>
+              {attempt.regressions && attempt.regressions.length > 0 ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">
+                    {copy.benchmarkAttemptRegressions}
+                  </div>
+                  <ul className="mt-0.5 space-y-0.5 text-[11px] text-rose-700 dark:text-rose-300">
+                    {attempt.regressions.slice(0, 5).map((t) => (
+                      <li key={t} className="font-mono">
+                        · {t}
+                      </li>
+                    ))}
+                    {attempt.regressions.length > 5 ? (
+                      <li className="text-rose-400 dark:text-rose-400/60">
+                        · ... +{attempt.regressions.length - 5}
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
+              {attempt.remaining_failing && attempt.remaining_failing.length > 0 ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                    {copy.benchmarkAttemptRemaining}
+                  </div>
+                  <ul className="mt-0.5 space-y-0.5 text-[11px] text-slate-600 dark:text-white/70">
+                    {attempt.remaining_failing.slice(0, 5).map((t) => (
+                      <li key={t} className="font-mono">
+                        · {t}
+                      </li>
+                    ))}
+                    {attempt.remaining_failing.length > 5 ? (
+                      <li className="text-slate-400 dark:text-white/40">
+                        · ... +{attempt.remaining_failing.length - 5}
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
+              {attempt.apply_error ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                    {copy.benchmarkAttemptApplyErr}
+                  </div>
+                  <pre className="mt-0.5 max-h-24 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                    {attempt.apply_error}
+                  </pre>
+                </div>
+              ) : null}
+              {attempt.compile_error_tail ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                    {copy.benchmarkAttemptCompileErr}
+                  </div>
+                  <pre className="mt-0.5 max-h-28 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                    {attempt.compile_error_tail}
+                  </pre>
+                </div>
+              ) : null}
+              {attempt.test_stdout_tail ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                    {copy.benchmarkAttemptTestStdout}
+                  </div>
+                  <pre className="mt-0.5 max-h-28 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                    {attempt.test_stdout_tail}
+                  </pre>
+                </div>
+              ) : null}
+              {attempt.llm_raw_preview ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                    {copy.benchmarkAttemptLLMInvalidJson}
+                  </div>
+                  <pre className="mt-0.5 max-h-28 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                    {attempt.llm_raw_preview}
+                  </pre>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function severityTone(severity: string): "rose" | "amber" | "emerald" | "slate" {
   const normalized = severity.toLowerCase();
   if (normalized === "critical" || normalized === "high" || normalized === "hard") return "rose";
@@ -716,6 +999,12 @@ export function BenchmarkWorkspace({
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 text-xs font-semibold">
+                          {run.run_status === "running" || run.run_status === "queued" ? (
+                            <span
+                              className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500 bench-pulse-dot"
+                              aria-hidden
+                            />
+                          ) : null}
                           <span className="truncate">
                             {(run.project_code ?? `#${run.project_id}`)} / {run.bug_key ?? `#${run.bug_id}`}
                           </span>
@@ -773,6 +1062,33 @@ export function BenchmarkWorkspace({
                       </>
                     }
                   />
+                  <div className="mt-2">
+                    <BenchmarkStageStepper
+                      copy={copy}
+                      stage={runDetail.stage ?? null}
+                      runMode={runDetail.run_mode ?? "full_repair"}
+                      runStatus={runDetail.run_status}
+                    />
+                    {runDetail.run_status === "running" || runDetail.run_status === "queued" ? (
+                      <div className="mt-2 space-y-1">
+                        <div className="bench-progress-track h-1.5" />
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-white/50">
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500 bench-pulse-dot"
+                              aria-hidden
+                            />
+                            {runDetail.run_status === "queued"
+                              ? copy.benchmarkLiveQueued
+                              : copy.benchmarkLiveRunning}
+                            {" · "}
+                            {runDetail.stage ?? "—"}
+                          </span>
+                          <span>{copy.benchmarkLiveEtaHint}</span>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <AdminMetricCard
                       label={copy.benchmarkStage}
@@ -827,6 +1143,9 @@ export function BenchmarkWorkspace({
                     <div className="mt-2 rounded-2xl border border-rose-500/20 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-300">
                       {runDetail.error_message}
                     </div>
+                  ) : null}
+                  {runDetail.run_mode === "full_repair" ? (
+                    <RepairAttemptsPanel copy={copy} report={runDetail.report} />
                   ) : null}
                   <div className="mt-3 space-y-2">
                     <AdminCodeBlock

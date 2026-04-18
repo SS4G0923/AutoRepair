@@ -240,10 +240,14 @@ def score_frame(
     exception_type: str,
     source_file_exists: bool,
     prev_frame: Optional[StackFrame],
+    *,
+    source_is_test: bool = False,
 ) -> FrameScore:
     """
     Improvements over your current scoring:
     - Still rewards early frames and source existence
+    - Only production-source existence gets the bonus; test sources get a
+      mild signal at best, so test frames cannot out-score project frames.
     - Adds 'stdlib_boundary' bonus: if previous frame is stdlib/reflect/runner and current is project
       => often the correct repair site (especially for NumberFormatException/IllegalArgumentException)
     - Strongly drops test/runner frames
@@ -253,10 +257,16 @@ def score_frame(
 
     kind = frame_kind(frame)
 
-    # Base: source existence is a strong signal of project relevance.
-    if source_file_exists:
+    # Base: source existence is a strong signal of project relevance, but
+    # ONLY when that source is under a production root. Giving a full bonus
+    # to test files lets assertion-only bugs (e.g. Math-2) pick the test
+    # class as the top suspect, which is always a dead-end for repair.
+    if source_file_exists and not source_is_test:
         score += 7.0
         reasons.append("source_exists(+7)")
+    elif source_file_exists and source_is_test:
+        score += 0.5
+        reasons.append("test_source_exists(+0.5)")
     else:
         score -= 3.0
         reasons.append("source_missing(-3)")
@@ -308,11 +318,23 @@ def filter_and_rank_frames(
     evidence: StackTraceEvidence,
     source_exists_fn: Callable[[StackFrame], bool],
     max_candidates: int = 10,
+    *,
+    source_is_test_fn: Optional[Callable[[StackFrame], bool]] = None,
 ) -> list[FrameScore]:
     """
-    Main improvements:
-    - We keep frames in evidence (including stdlib/test/runner) to compute adjacency bonuses.
-    - Candidates are restricted to likely project frames.
+    Rank candidate frames that could be the bug location.
+
+    Key design choices:
+    - We look at every frame in the selected cause segment (including stdlib
+      and test frames) so adjacency bonuses can reference the real call site.
+    - Only *production* frames are scored as repair candidates. If nothing
+      remains after the project-only filter, we return an **empty list** on
+      purpose — callers are expected to escalate to metadata-based locators
+      (e.g. Defects4J ``classes.modified``) rather than silently patching a
+      test file. This is how assertion-only bugs like Math-2 are handled.
+    - ``source_is_test_fn`` lets scoring distinguish production sources from
+      test sources even when both exist on disk, so test files cannot win the
+      existence bonus.
     """
     exc_type = evidence.exception.exception_type
     frames = evidence.frames
@@ -320,23 +342,35 @@ def filter_and_rank_frames(
     scored: list[FrameScore] = []
     for i, f in enumerate(frames):
         prev_f = frames[i - 1] if i > 0 else None
-        exists = bool(source_exists_fn(f))
 
-        # Candidate gate: keep only likely project repair targets.
-        # (You can relax this if you later want to include test oracle extraction separately.)
+        # Candidate gate: keep only likely production repair targets.
         if is_standard_lib(f) or is_build_or_runner_frame(f) or is_reflection_or_proxy(f):
             continue
         if is_test_frame(f):
             continue
 
-        scored.append(score_frame(f, exc_type, exists, prev_f))
+        exists = bool(source_exists_fn(f))
+        is_test_src = bool(source_is_test_fn(f)) if source_is_test_fn else False
+        # Even if a frame's class name looks production-y, if its source is
+        # only resolvable via the test index we should skip it entirely —
+        # callers will fall back to ground-truth metadata instead.
+        if is_test_src and not exists:
+            continue
 
-    # Fallback: if we filtered everything, score all frames (still sorted)
-    if not scored:
-        for i, f in enumerate(frames[: max_candidates * 2]):
-            prev_f = frames[i - 1] if i > 0 else None
-            exists = bool(source_exists_fn(f))
-            scored.append(score_frame(f, exc_type, exists, prev_f))
+        scored.append(
+            score_frame(
+                f,
+                exc_type,
+                exists,
+                prev_f,
+                source_is_test=is_test_src,
+            )
+        )
+
+    # NOTE: We deliberately do NOT fall back to scoring stdlib/test frames
+    # here. An empty result is a correct, informative signal: "no production
+    # frame was recovered from this stack trace". Returning a stdlib/test
+    # frame as the top suspect is what caused Math-2 to patch the test file.
 
     scored.sort(key=lambda s: s.score, reverse=True)
     return scored[:max_candidates]

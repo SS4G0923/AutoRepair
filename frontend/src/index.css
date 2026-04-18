@@ -159,11 +159,77 @@ html.dark .chat-thinking-glint {
   animation: app-scale-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
+@keyframes bench-progress-indeterminate {
+  0% {
+    transform: translateX(-40%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
+@keyframes bench-pulse-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes bench-stage-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(14, 165, 233, 0.18);
+  }
+}
+
+.bench-progress-track {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.bench-progress-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    rgba(14, 165, 233, 0) 0%,
+    rgba(14, 165, 233, 0.8) 50%,
+    rgba(14, 165, 233, 0) 100%
+  );
+  animation: bench-progress-indeterminate 1.6s linear infinite;
+}
+
+.bench-pulse-dot {
+  animation: bench-pulse-dot 1.4s ease-in-out infinite;
+}
+
+.bench-stage-active {
+  animation: bench-stage-pulse 1.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-fade-in,
   .app-slide-up,
   .app-slide-down,
-  .app-scale-in {
+  .app-scale-in,
+  .bench-pulse-dot,
+  .bench-stage-active {
     animation: none;
+  }
+  .bench-progress-track::after {
+    animation: none;
+    opacity: 0.6;
   }
 }

@@ -1,11 +1,39 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Callable
+
+
+def _ollama_default_options() -> dict[str, Any]:
+    """Baseline Ollama `options` with env-var overrides.
+
+    - OLLAMA_NUM_PREDICT  (default 4096)  — max tokens to generate
+    - OLLAMA_NUM_CTX      (default 8192)  — context window size
+    - OLLAMA_TEMPERATURE  (default 0.2)   — repair tasks benefit from low temp
+    """
+
+    def _int_env(name: str, default: int) -> int:
+        try:
+            return int(os.getenv(name, "").strip() or default)
+        except (TypeError, ValueError):
+            return default
+
+    def _float_env(name: str, default: float) -> float:
+        try:
+            return float(os.getenv(name, "").strip() or default)
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "num_predict": _int_env("OLLAMA_NUM_PREDICT", 4096),
+        "num_ctx": _int_env("OLLAMA_NUM_CTX", 8192),
+        "temperature": _float_env("OLLAMA_TEMPERATURE", 0.2),
+    }
 
 from backend.llm.agent_tools import FunctionTool
 from backend.llm.call_gpt import (
@@ -290,6 +318,7 @@ def _call_with_tools(
             "think": thinking_enabled,
             "messages": messages,
             "tools": [tool.as_openai_tool() for tool in tools],
+            "options": _ollama_default_options(),
         }
         response = _post_json(url, request_payload, api_key=api_key)
 
@@ -413,6 +442,15 @@ def call_llm_for_json(
         "stream": bool(stream and not isJson),
         "think": thinking_enabled,
         "messages": _as_ollama_messages(system_prompt=system_prompt, prompt=prompt),
+        # Ollama's default `num_predict` is 128 on many builds, which truncates
+        # any non-trivial JSON patch response and causes downstream "Model
+        # response was not valid JSON" errors. Raise the ceiling explicitly;
+        # models that want fewer tokens will simply stop earlier.
+        #
+        # `num_ctx` likewise defaults to 2048 for some models and will silently
+        # drop the tail of a long repair prompt. 8192 fits the AutoRepair
+        # benchmark prompts comfortably without bloating VRAM.
+        "options": _ollama_default_options(),
     }
     if isJson:
         request_payload["format"] = "json"
