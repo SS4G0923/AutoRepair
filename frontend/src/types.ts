@@ -4,11 +4,24 @@ export type SessionStatus = "idle" | "streaming" | "done" | "error";
 export type StageName = "run" | "inspect" | "plan" | "code" | "verify";
 export type AuthMode = "login" | "register";
 export type OAuthProvider = "github" | "google";
-export type WorkspaceMode = "agent" | "chat" | "admin" | "billing";
+export type WorkspaceMode = "agent" | "chat" | "admin" | "billing" | "benchmark" | "profile" | "teams";
 export type AgentSourceType = "single_file" | "zip" | "github";
 export type UserRole = "basic" | "advanced" | "admin";
 export type AccountStatus = "active" | "suspended";
-export type AdminPage = "dashboard" | "users" | "requests" | "models" | "activity" | "payments";
+export type AdminPage =
+  | "dashboard"
+  | "users"
+  | "requests"
+  | "models"
+  | "activity"
+  | "payments"
+  | "benchmark";
+export type BenchmarkPage = "projects" | "runs" | "leaderboard" | "experiments";
+export type ProfilePage = "overview" | "wallet" | "preferences" | "api_tokens";
+export type TeamsPage = "organizations" | "projects" | "invites";
+export type BenchmarkRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type BenchmarkRunMode = "inspect_only" | "mock_repair" | "full_repair";
+export type BenchmarkStrategy = "full_pipeline" | "naive_chat";
 export type PaymentMethodCode = "card" | "paypal" | "wechat" | "alipay";
 export type PaymentOrderStatus = "pending" | "paid" | "rejected" | "cancelled" | "failed";
 
@@ -513,4 +526,341 @@ export interface AdminPaymentOrderList {
   page_size: number;
   total: number;
   summary: AdminPaymentOrderSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Credit Wallet
+// ---------------------------------------------------------------------------
+
+export interface CreditPricingRule {
+  role_code: UserRole;
+  monthly_free_credits: number;
+  cost_per_chat: number;
+  cost_per_repair: number;
+  cost_per_benchmark_run: number;
+  updated_at: string | null;
+}
+
+export interface CreditTransaction {
+  id: number;
+  user_id: number;
+  change_credits: number;
+  balance_after: number;
+  reason_code: string;
+  reference_type: string | null;
+  reference_id: number | null;
+  note: string | null;
+  actor_user_id: number | null;
+  created_at: string;
+}
+
+export interface CreditWalletSnapshot {
+  wallet: {
+    user_id: number;
+    balance_credits: number;
+    lifetime_earned: number;
+    lifetime_spent: number;
+    last_grant_at: string | null;
+    updated_at: string | null;
+  };
+  transactions: CreditTransaction[];
+  pricing: CreditPricingRule | null;
+  role: UserRole | string;
+}
+
+export interface AdminWalletBalanceItem {
+  user_id: number;
+  email: string;
+  display_name: string;
+  role: UserRole;
+  balance_credits: number;
+  lifetime_earned: number;
+  lifetime_spent: number;
+  last_grant_at: string | null;
+  updated_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Benchmark
+// ---------------------------------------------------------------------------
+
+export interface BenchmarkProject {
+  id: number;
+  project_code: string;
+  display_name: string;
+  source_type: "defects4j" | "custom";
+  language: string;
+  description: string | null;
+  tags: string[];
+  is_active: boolean;
+  sort_order: number;
+  bug_count: number;
+  last_run_at: string | null;
+}
+
+export interface BenchmarkBug {
+  id: number;
+  project_id: number;
+  bug_key: string;
+  title: string;
+  severity: string;
+  defects4j_project: string | null;
+  defects4j_bug_id: number | null;
+  description: string | null;
+  tags: string[];
+  is_active: boolean;
+}
+
+export interface BenchmarkRunSummary {
+  id: number;
+  user_id: number;
+  organization_id: number | null;
+  project_id: number;
+  project_code: string | null;
+  bug_id: number;
+  bug_key: string | null;
+  defects4j_project: string | null;
+  defects4j_bug_id: number | null;
+  model_key: string;
+  run_mode: BenchmarkRunMode;
+  run_status: BenchmarkRunStatus;
+  stage: string | null;
+  pass_count: number;
+  fail_count: number;
+  total_tests: number;
+  duration_ms: number;
+  credits_spent: number;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  strategy?: BenchmarkStrategy | string | null;
+  experiment_id?: number | null;
+  is_plausible?: boolean;
+  is_correct?: boolean;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  patch_lines_added?: number;
+  patch_lines_removed?: number;
+  llm_rounds?: number;
+  failed_tests_before?: number;
+  failed_tests_after?: number;
+}
+
+export interface BenchmarkRunDetail extends BenchmarkRunSummary {
+  report: Record<string, unknown> | null;
+  patch_diff: string;
+}
+
+export interface BenchmarkLeaderboardItem {
+  project_id: number;
+  project_code: string | null;
+  project_display_name: string | null;
+  model_key: string;
+  sample_count: number;
+  success_count: number;
+  pass_rate: number;
+  avg_duration_ms: number;
+  last_run_at: string | null;
+}
+
+export interface BenchmarkSummary {
+  total_projects: number;
+  total_bugs: number;
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+}
+
+export interface BenchmarkExperimentArmConfig {
+  strategy: BenchmarkStrategy | string;
+  model_key: string;
+}
+
+export interface BenchmarkExperimentSummary {
+  id: number;
+  experiment_code: string;
+  title: string | null;
+  description: string | null;
+  hypothesis: string | null;
+  status: string;
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  config: {
+    arms?: BenchmarkExperimentArmConfig[];
+    bug_ids?: number[];
+    bug_keys?: string[];
+  } | Record<string, unknown>;
+  created_by_user_id: number | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface BenchmarkExperimentArmResult {
+  strategy: string;
+  model_key: string;
+  total: number;
+  completed: number;
+  plausible: number;
+  correct: number;
+  plausible_rate: number;
+  correct_rate: number;
+  avg_duration_ms: number;
+  avg_tokens: number;
+}
+
+export interface BenchmarkExperimentPerBugRow {
+  bug_key: string;
+  strategy: string;
+  model_key: string;
+  run_status: string;
+  is_plausible: boolean;
+  is_correct: boolean;
+  duration_ms: number;
+  total_tokens: number;
+  error_message: string | null;
+}
+
+export interface BenchmarkExperimentDetail {
+  experiment: BenchmarkExperimentSummary;
+  arms: BenchmarkExperimentArmResult[];
+  per_bug: BenchmarkExperimentPerBugRow[];
+}
+
+export interface AdminBenchmarkRun extends BenchmarkRunSummary {
+  user_email: string | null;
+  user_display_name: string | null;
+}
+
+export interface AdminBenchmarkRefreshResult {
+  d4j_home: string;
+  projects: Array<{ project_code: string; upserted: number; new: number }>;
+  total_imported: number;
+  total_new: number;
+}
+
+// ---------------------------------------------------------------------------
+// Teams & Projects
+// ---------------------------------------------------------------------------
+
+export interface TeamOrganization {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
+  owner_user_id: number;
+  plan_code: string;
+  member_count: number;
+  project_count: number;
+  created_at: string;
+  updated_at: string;
+  member_role: "owner" | "admin" | "member" | null;
+}
+
+export interface TeamMember {
+  id: number;
+  organization_id: number;
+  user_id: number;
+  email: string;
+  display_name: string;
+  avatar_url: string | null;
+  role: "owner" | "admin" | "member";
+  joined_at: string;
+}
+
+export interface TeamInvite {
+  id: number;
+  organization_id: number;
+  email: string;
+  invite_token: string;
+  invite_status: "pending" | "accepted" | "revoked" | "expired";
+  invited_by_user_id: number | null;
+  expires_at: string;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+export interface TeamProject {
+  id: number;
+  organization_id: number;
+  owner_user_id: number;
+  name: string;
+  slug: string;
+  language: string | null;
+  description: string | null;
+  repo_url: string | null;
+  default_entrypoint: string | null;
+  color_hex: string | null;
+  history_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Profile / Preferences / API Tokens
+// ---------------------------------------------------------------------------
+
+export interface UserPreferences {
+  default_agent_model: string | null;
+  default_chat_model: string | null;
+  default_language: string | null;
+  locale: UiLocale;
+  theme: ThemeMode;
+  timezone: string | null;
+  bio: string | null;
+  show_site_map_widget: boolean;
+  updated_at: string | null;
+}
+
+export interface ProfileOverview {
+  total_histories: number;
+  total_repair_sessions: number;
+  total_chat_sessions: number;
+  total_benchmark_runs: number;
+  organization_count: number;
+  lifetime_tokens: number;
+}
+
+export interface UserApiToken {
+  id: number;
+  user_id: number;
+  token_name: string;
+  token_prefix: string;
+  scope: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  revealed_token?: string | null;
+}
+
+export interface ProfileSnapshot {
+  user: AuthenticatedUser;
+  preferences: UserPreferences;
+  overview: ProfileOverview;
+  wallet: CreditWalletSnapshot["wallet"];
+  organizations: TeamOrganization[];
+  api_tokens: UserApiToken[];
+}
+
+// ---------------------------------------------------------------------------
+// Site map widget
+// ---------------------------------------------------------------------------
+
+export interface SiteMapItem {
+  code: string;
+  label: string;
+  path: string;
+}
+
+export interface SiteMapGroup {
+  code: string;
+  title: string;
+  items: SiteMapItem[];
+}
+
+export interface SiteMapResponse {
+  groups: SiteMapGroup[];
 }

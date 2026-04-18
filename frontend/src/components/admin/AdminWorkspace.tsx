@@ -14,6 +14,7 @@ import type {
   AdminUserItem,
 } from "../../types";
 import { AdminActivityPage } from "./AdminActivityPage";
+import { AdminBenchmarkPage } from "./AdminBenchmarkPage";
 import { AdminDashboardPage } from "./AdminDashboardPage";
 import { AdminModelsPage } from "./AdminModelsPage";
 import { AdminPaymentsPage } from "./AdminPaymentsPage";
@@ -25,6 +26,7 @@ interface AdminWorkspaceProps {
   adminError: string;
   adminLoading: boolean;
   adminPage: AdminPage;
+  apiBaseUrl: string;
   adminModelMutatingId: number | "create" | null;
   adminPaymentActingOrderId: number | null;
   adminUserRoleUpdatingId: number | null;
@@ -65,6 +67,7 @@ export function AdminWorkspace({
   adminModelMutatingId,
   adminPaymentActingOrderId,
   adminUserRoleUpdatingId,
+  apiBaseUrl,
   copy,
   dashboardData,
   loginEvents,
@@ -123,6 +126,11 @@ export function AdminWorkspace({
       eyebrow: copy.adminPayments,
       title: copy.adminPaymentsTitle,
       hint: copy.adminPaymentsHint,
+    },
+    benchmark: {
+      eyebrow: copy.adminBenchmark,
+      title: copy.adminBenchmarkTitle,
+      hint: copy.adminBenchmarkHint,
     },
   };
 
@@ -200,6 +208,8 @@ export function AdminWorkspace({
             onApprove={onApprovePaymentOrder}
             onReject={onRejectPaymentOrder}
           />
+        ) : adminPage === "benchmark" ? (
+          <AdminBenchmarkPage apiBaseUrl={apiBaseUrl} copy={copy} />
         ) : (
           <AdminActivityPage
             activityPage={activityPage}

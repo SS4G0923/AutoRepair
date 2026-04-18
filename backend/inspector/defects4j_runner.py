@@ -30,17 +30,25 @@ class Defects4JError(RuntimeError):
 
 def _resolve_defects4j_executable() -> str:
     """
-    Resolve defects4j CLI location:
-      - If $D4J_HOME is set: $D4J_HOME/framework/bin/defects4j
-      - Else: rely on PATH
+    Resolve defects4j CLI location (first match wins):
+      1. $D4J_HOME/framework/bin/defects4j
+      2. defects4j on $PATH (via shutil.which)
     """
+    d4j_home = os.getenv("D4J_HOME")
+    if d4j_home:
+        candidate = Path(d4j_home).expanduser() / "framework" / "bin" / "defects4j"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
     which = shutil.which("defects4j")
     if which:
         return which
-    else:
-        raise Defects4JError(
-            "Cannot find defects4j executable. Set D4J_HOME or add defects4j to PATH."
-        )
+
+    raise Defects4JError(
+        "Cannot find defects4j executable. "
+        f"Set D4J_HOME (current={d4j_home or '<unset>'}) "
+        "to point at your Defects4J checkout, or add `defects4j` to PATH."
+    )
 
 
 def run_cmd(

@@ -183,6 +183,68 @@ export function PaymentIcon() {
   );
 }
 
+export function BenchmarkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <path
+        d="M5 20V10m7 10V4m7 16v-7M3.5 20h17"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+export function ProfileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <circle cx="12" cy="8" r="3.6" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M5 20a7 7 0 0 1 14 0"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+export function TeamsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <circle cx="9" cy="9" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="16.5" cy="8" r="2.3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M3.5 19a5.5 5.5 0 0 1 11 0M14 19a4.5 4.5 0 0 1 7 0"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+export function WalletIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <path
+        d="M4 7h13a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11v3"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <circle cx="15.5" cy="13" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function TrashIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">

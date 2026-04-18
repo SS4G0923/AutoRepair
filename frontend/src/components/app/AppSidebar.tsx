@@ -4,11 +4,14 @@ import {
   ActivityIcon,
   AdminIcon,
   AgentIcon,
+  BenchmarkIcon,
   ChatIcon,
   DashboardIcon,
   ModelsIcon,
   PaymentIcon,
+  ProfileIcon,
   RequestsIcon,
+  TeamsIcon,
   TrashIcon,
   UsersIcon,
 } from "./AppIcons";
@@ -64,6 +67,9 @@ interface AppSidebarProps {
   onStartNewAgentSession: () => void;
   onStartNewAdminSession: () => void;
   onStartNewChatSession: () => void;
+  onStartNewBenchmarkSession: () => void;
+  onStartNewProfileSession: () => void;
+  onStartNewTeamsSession: () => void;
 }
 
 export function AppSidebar({
@@ -83,6 +89,9 @@ export function AppSidebar({
   onStartNewAgentSession,
   onStartNewAdminSession,
   onStartNewChatSession,
+  onStartNewBenchmarkSession,
+  onStartNewProfileSession,
+  onStartNewTeamsSession,
 }: AppSidebarProps) {
   const adminNavItems: Array<{
     page: AdminPage;
@@ -125,6 +134,12 @@ export function AppSidebar({
       label: copy.adminPayments,
       hint: copy.adminPaymentsHint,
       icon: PaymentIcon,
+    },
+    {
+      page: "benchmark",
+      label: copy.adminBenchmark,
+      hint: copy.adminBenchmarkHint,
+      icon: BenchmarkIcon,
     },
   ];
 
@@ -183,6 +198,81 @@ export function AppSidebar({
                 }`}
               >
                 {copy.modeChatHint}
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={onStartNewBenchmarkSession}
+            className={`flex w-full items-center gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
+              workspaceMode === "benchmark"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
+                : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
+            }`}
+          >
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-black/10 dark:bg-white/10">
+              <BenchmarkIcon />
+            </div>
+            <div className="min-w-0">
+              <div className="font-medium">{copy.modeBenchmark}</div>
+              <div
+                className={`text-xs ${
+                  workspaceMode === "benchmark"
+                    ? "text-white/70 dark:text-slate-950/70"
+                    : "text-slate-500 dark:text-white/40"
+                }`}
+              >
+                {copy.modeBenchmarkHint}
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={onStartNewTeamsSession}
+            className={`flex w-full items-center gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
+              workspaceMode === "teams"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
+                : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
+            }`}
+          >
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-black/10 dark:bg-white/10">
+              <TeamsIcon />
+            </div>
+            <div className="min-w-0">
+              <div className="font-medium">{copy.modeTeams}</div>
+              <div
+                className={`text-xs ${
+                  workspaceMode === "teams"
+                    ? "text-white/70 dark:text-slate-950/70"
+                    : "text-slate-500 dark:text-white/40"
+                }`}
+              >
+                {copy.modeTeamsHint}
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={onStartNewProfileSession}
+            className={`flex w-full items-center gap-2 rounded-[16px] px-2.5 py-2.5 text-left transition ${
+              workspaceMode === "profile"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
+                : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"
+            }`}
+          >
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-black/10 dark:bg-white/10">
+              <ProfileIcon />
+            </div>
+            <div className="min-w-0">
+              <div className="font-medium">{copy.modeProfile}</div>
+              <div
+                className={`text-xs ${
+                  workspaceMode === "profile"
+                    ? "text-white/70 dark:text-slate-950/70"
+                    : "text-slate-500 dark:text-white/40"
+                }`}
+              >
+                {copy.modeProfileHint}
               </div>
             </div>
           </button>

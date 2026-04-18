@@ -19,6 +19,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from backend.auth.store import (
     create_local_user,
+    get_db_connection,
     get_user_by_id,
     get_user_with_password,
     init_auth_db,
@@ -35,6 +36,23 @@ from backend.admin.store import (
     list_login_events_for_admin,
     list_users_for_admin,
 )
+from backend.benchmark import store as bench_store
+from backend.benchmark.runner import run_benchmark_in_background
+from backend.pdf_export.exporter import (
+    build_benchmark_report_pdf,
+    build_repair_report_pdf,
+)
+from backend.profile.store import (
+    create_api_token,
+    get_preferences,
+    get_profile_overview,
+    list_api_tokens,
+    revoke_api_token,
+    update_preferences,
+)
+from backend.teams import store as team_store
+from backend.wallet import store as wallet_store
+from backend.wallet.store import InsufficientCreditsError
 from backend.billing.store import (
     approve_payment_order,
     complete_payment_order_in_sandbox,
@@ -1226,6 +1244,25 @@ def repair_stream() -> Response:
         return jsonify({"error": "Authentication required."}), 401
     user_id = int(user["id"])
 
+    repair_cost = wallet_store.pricing_cost_for_role(str(user.get("role") or "basic"), "repair")
+    try:
+        wallet_store.spend_credits(
+            user_id=user_id,
+            amount=repair_cost,
+            reason_code="repair",
+            reference_type="repair_pipeline",
+            note=f"repair · {repair_request.language} · {repair_request.model}",
+        )
+    except InsufficientCreditsError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+                "code": "insufficient_credits",
+                "required": exc.required,
+                "balance": exc.balance,
+            }
+        ), 402
+
     event_queue: queue.Queue[str | object] = queue.Queue()
     sentinel = object()
     captured: dict[str, Any] = {
@@ -1617,6 +1654,25 @@ def chat_stream() -> Response:
         return jsonify({"error": "Authentication required."}), 401
     user_id = int(user["id"])
 
+    chat_cost = wallet_store.pricing_cost_for_role(str(user.get("role") or "basic"), "chat")
+    try:
+        wallet_store.spend_credits(
+            user_id=user_id,
+            amount=chat_cost,
+            reason_code="chat",
+            reference_type="chat_pipeline",
+            note=f"chat · {chat_request.model}",
+        )
+    except InsufficientCreditsError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+                "code": "insufficient_credits",
+                "required": exc.required,
+                "balance": exc.balance,
+            }
+        ), 402
+
     event_queue: queue.Queue[str | object] = queue.Queue()
     sentinel = object()
     assistant_reasoning = ""
@@ -1683,6 +1739,820 @@ def chat_stream() -> Response:
     response.headers["Connection"] = "keep-alive"
     response.headers["X-Accel-Buffering"] = "no"
     return response
+
+
+# ---------------------------------------------------------------------------
+# Credit Wallet endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/wallet/summary", methods=["GET", "OPTIONS"])
+@_require_login
+def wallet_summary() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    wallet_store.ensure_wallet_exists(int(user["id"]))
+    return jsonify(wallet_store.get_wallet_snapshot(int(user["id"])))
+
+
+@app.route("/api/admin/wallet/balances", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_wallet_balances() -> Response:
+    limit = request.args.get("limit", default=200, type=int) or 200
+    return jsonify({"items": wallet_store.list_wallets_for_admin(limit=limit)})
+
+
+@app.route("/api/admin/wallet/pricing", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_wallet_pricing() -> Response:
+    return jsonify({"items": wallet_store.list_pricing_rules()})
+
+
+@app.route("/api/admin/wallet/pricing", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_wallet_pricing_update() -> Response:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+    try:
+        rule = wallet_store.update_pricing_rule(
+            role_code=str(payload.get("role_code", "")).strip().lower(),
+            monthly_free_credits=int(payload.get("monthly_free_credits", 0) or 0),
+            cost_per_chat=int(payload.get("cost_per_chat", 0) or 0),
+            cost_per_repair=int(payload.get("cost_per_repair", 0) or 0),
+            cost_per_benchmark_run=int(payload.get("cost_per_benchmark_run", 0) or 0),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"item": rule})
+
+
+@app.route("/api/admin/wallet/grant", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_wallet_grant() -> Response:
+    admin_user = _current_user()
+    if admin_user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+    try:
+        target_user_id = int(payload.get("user_id") or 0)
+        amount = int(payload.get("amount") or 0)
+        if target_user_id <= 0 or amount <= 0:
+            raise ValueError("user_id and positive amount are required.")
+        note = str(payload.get("note", "")).strip() or None
+        result = wallet_store.grant_credits(
+            user_id=target_user_id,
+            amount=amount,
+            reason_code="admin_grant",
+            actor_user_id=int(admin_user["id"]),
+            note=note,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"transaction": result})
+
+
+# ---------------------------------------------------------------------------
+# Benchmark endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/benchmark/projects", methods=["GET", "OPTIONS"])
+@_require_login
+def benchmark_projects_list() -> Response:
+    return jsonify(
+        {
+            "items": bench_store.list_benchmark_projects(),
+            "summary": bench_store.get_benchmark_summary(),
+        }
+    )
+
+
+@app.route("/api/benchmark/projects/<int:project_id>/bugs", methods=["GET", "OPTIONS"])
+@_require_login
+def benchmark_bugs_list(project_id: int) -> Response:
+    return jsonify({"items": bench_store.list_benchmark_bugs(project_id=project_id)})
+
+
+@app.route("/api/benchmark/runs", methods=["GET", "OPTIONS"])
+@_require_login
+def benchmark_runs_list() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    limit = request.args.get("limit", default=50, type=int) or 50
+    offset = request.args.get("offset", default=0, type=int) or 0
+    return jsonify(bench_store.list_runs_for_user(int(user["id"]), limit=limit, offset=offset))
+
+
+@app.route("/api/benchmark/leaderboard", methods=["GET", "OPTIONS"])
+@_require_login
+def benchmark_leaderboard() -> Response:
+    return jsonify({"items": bench_store.get_leaderboard()})
+
+
+@app.route("/api/benchmark/runs/<int:run_id>", methods=["GET", "OPTIONS"])
+@_require_login
+def benchmark_run_detail(run_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    run = bench_store.get_run(run_id, include_heavy=True)
+    if run is None or int(run.get("user_id") or 0) != int(user["id"]):
+        if run is not None and _is_admin(user):
+            return jsonify(run)
+        return jsonify({"error": "Benchmark run was not found."}), 404
+    return jsonify(run)
+
+
+@app.route("/api/benchmark/runs", methods=["POST", "OPTIONS"])
+@_require_login
+def benchmark_run_create() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+
+    try:
+        bug_id = int(payload.get("bug_id") or 0)
+        model_key = str(payload.get("model_key") or "").strip()
+        run_mode = str(payload.get("run_mode") or "inspect_only").strip().lower()
+        strategy = str(payload.get("strategy") or "").strip().lower() or None
+        if bug_id <= 0:
+            raise ValueError("`bug_id` is required.")
+        if not model_key:
+            raise ValueError("`model_key` is required.")
+        if run_mode not in {"inspect_only", "mock_repair", "full_repair"}:
+            raise ValueError(
+                "`run_mode` must be one of: inspect_only, mock_repair, full_repair."
+            )
+        if run_mode == "full_repair":
+            strategy = strategy or "full_pipeline"
+            if strategy not in {"full_pipeline", "naive_chat"}:
+                raise ValueError("`strategy` must be one of: full_pipeline, naive_chat.")
+
+        bug_ctx = bench_store.get_bug_with_project(bug_id)
+        if bug_ctx is None:
+            return jsonify({"error": "Benchmark bug was not found."}), 404
+
+        project_source = bug_ctx["project"].get("source_type")
+        if project_source != "defects4j":
+            return jsonify({"error": f"Only defects4j benchmarks are supported (got {project_source})."}), 400
+
+        role = str(user.get("role") or "basic")
+        cost = wallet_store.pricing_cost_for_role(role, "benchmark_run")
+        try:
+            wallet_store.spend_credits(
+                user_id=int(user["id"]),
+                amount=cost,
+                reason_code="benchmark_run",
+                reference_type="benchmark_run",
+                note=f"Benchmark {bug_ctx['project']['project_code']}:{bug_ctx['bug']['bug_key']}",
+            )
+        except InsufficientCreditsError as exc:
+            return jsonify(
+                {
+                    "error": str(exc),
+                    "code": "insufficient_credits",
+                    "required": exc.required,
+                    "balance": exc.balance,
+                }
+            ), 402
+
+        run_id = bench_store.create_run(
+            user_id=int(user["id"]),
+            organization_id=None,
+            project_id=int(bug_ctx["project"]["id"]),
+            bug_id=int(bug_ctx["bug"]["id"]),
+            model_key=model_key,
+            run_mode=run_mode,
+            credits_spent=cost,
+            strategy=strategy,
+        )
+
+        defects4j_project = str(bug_ctx["bug"].get("defects4j_project") or "").strip()
+        defects4j_bug_id = int(bug_ctx["bug"].get("defects4j_bug_id") or 0)
+        if not defects4j_project or defects4j_bug_id <= 0:
+            bench_store.update_run_progress(
+                run_id,
+                stage="error",
+                run_status="failed",
+                error_message="Bug is missing defects4j_project / defects4j_bug_id metadata.",
+                finalize=True,
+            )
+            return jsonify({"error": "Bug is missing defects4j_project / defects4j_bug_id metadata."}), 400
+
+        if run_mode == "full_repair":
+            import threading
+
+            from backend.benchmark.repair_runner import run_full_repair_for_bug
+
+            threading.Thread(
+                target=run_full_repair_for_bug,
+                kwargs={
+                    "run_id": run_id,
+                    "user_id": int(user["id"]),
+                    "organization_id": None,
+                    "project_code": str(bug_ctx["project"]["project_code"]),
+                    "defects4j_project": defects4j_project,
+                    "defects4j_bug_id": defects4j_bug_id,
+                    "model_key": model_key,
+                    "strategy": strategy or "full_pipeline",
+                    "force_checkout": True,
+                },
+                daemon=True,
+                name=f"benchmark-repair-{run_id}",
+            ).start()
+        else:
+            run_benchmark_in_background(
+                run_id=run_id,
+                user_id=int(user["id"]),
+                organization_id=None,
+                project_code=str(bug_ctx["project"]["project_code"]),
+                defects4j_project=defects4j_project,
+                defects4j_bug_id=defects4j_bug_id,
+                model_key=model_key,
+                run_mode=run_mode,
+                force_checkout=True,
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"run_id": run_id})
+
+
+@app.route("/api/admin/benchmark/runs", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_benchmark_runs_list() -> Response:
+    limit = request.args.get("limit", default=100, type=int) or 100
+    return jsonify({"items": bench_store.list_runs_for_admin(limit=limit)})
+
+
+@app.route("/api/admin/benchmark/refresh-defects4j", methods=["POST", "OPTIONS"])
+@_require_admin
+def admin_benchmark_refresh_defects4j() -> Response:
+    """Re-import active-bugs.csv for every known Defects4J project."""
+    payload = request.get_json(silent=True) or {}
+    d4j_home = str(payload.get("d4j_home") or "").strip() or None
+    projects = payload.get("projects") or None
+    if projects is not None and not isinstance(projects, list):
+        return jsonify({"error": "`projects` must be a list of project codes."}), 400
+    limit_per_project = payload.get("limit_per_project")
+    try:
+        from backend.scripts.import_defects4j_bugs import import_all
+
+        summary = import_all(
+            d4j_home=d4j_home,
+            projects=list(projects) if projects else None,
+            limit_per_project=int(limit_per_project) if limit_per_project else None,
+        )
+    except SystemExit as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive
+        return jsonify({"error": f"Import failed: {exc}"}), 500
+    return jsonify({"summary": summary})
+
+
+# ---------------------------------------------------------------------------
+# Benchmark comparison experiments (weak-model-vs-strong-model study)
+# ---------------------------------------------------------------------------
+
+
+def _run_benchmark_experiment_in_background(
+    *,
+    experiment_id: int,
+    user_id: int,
+    bug_ids: list[int],
+    arms: list[dict[str, str]],
+) -> None:
+    """Execute every (bug × arm) combo synchronously in a background thread."""
+    import logging as _logging
+
+    logger = _logging.getLogger("backend.benchmark.experiment")
+    from backend.benchmark.repair_runner import run_full_repair_for_bug
+
+    bench_store.update_experiment_status(experiment_id, status="running", mark_started=True)
+    try:
+        for bug_id in bug_ids:
+            bug_ctx = bench_store.get_bug_with_project(bug_id)
+            if bug_ctx is None:
+                logger.warning("Experiment %s: bug_id %s not found", experiment_id, bug_id)
+                continue
+            project_code = str(bug_ctx["project"]["project_code"])
+            defects4j_project = str(bug_ctx["bug"].get("defects4j_project") or "").strip()
+            defects4j_bug_id = int(bug_ctx["bug"].get("defects4j_bug_id") or 0)
+            if not defects4j_project or defects4j_bug_id <= 0:
+                logger.warning(
+                    "Experiment %s: bug %s missing defects4j metadata", experiment_id, bug_id
+                )
+                continue
+            for arm in arms:
+                strategy = arm["strategy"]
+                model_key = arm["model_key"]
+                run_id = bench_store.create_run(
+                    user_id=user_id,
+                    organization_id=None,
+                    project_id=int(bug_ctx["project"]["id"]),
+                    bug_id=int(bug_ctx["bug"]["id"]),
+                    model_key=model_key,
+                    run_mode="full_repair",
+                    credits_spent=0,
+                    strategy=strategy,
+                    experiment_id=experiment_id,
+                )
+                try:
+                    run_full_repair_for_bug(
+                        run_id=run_id,
+                        user_id=user_id,
+                        organization_id=None,
+                        project_code=project_code,
+                        defects4j_project=defects4j_project,
+                        defects4j_bug_id=defects4j_bug_id,
+                        model_key=model_key,
+                        strategy=strategy,
+                        experiment_id=experiment_id,
+                        force_checkout=True,
+                    )
+                except Exception as exc:  # pragma: no cover
+                    logger.exception(
+                        "Experiment %s run %s failed: %s", experiment_id, run_id, exc
+                    )
+        bench_store.recount_experiment(experiment_id)
+        bench_store.update_experiment_status(
+            experiment_id, status="completed", mark_finished=True
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.exception("Experiment %s failed: %s", experiment_id, exc)
+        bench_store.update_experiment_status(
+            experiment_id, status="failed", mark_finished=True
+        )
+
+
+@app.route("/api/benchmark/experiments", methods=["GET", "OPTIONS"])
+@_require_login
+def benchmark_experiments_list() -> Response:
+    limit = request.args.get("limit", default=50, type=int) or 50
+    return jsonify({"items": bench_store.list_experiments(limit=limit)})
+
+
+@app.route("/api/benchmark/experiments/<int:experiment_id>", methods=["GET", "OPTIONS"])
+@_require_login
+def benchmark_experiment_detail(experiment_id: int) -> Response:
+    data = bench_store.get_experiment_results(experiment_id)
+    if not data:
+        return jsonify({"error": "Experiment not found."}), 404
+    return jsonify(data)
+
+
+@app.route("/api/benchmark/experiments", methods=["POST", "OPTIONS"])
+@_require_login
+def benchmark_experiment_create() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+
+    experiment_code = str(payload.get("experiment_code") or "").strip()
+    if not experiment_code:
+        return jsonify({"error": "`experiment_code` is required."}), 400
+    title = str(payload.get("title") or experiment_code).strip() or experiment_code
+    description = (str(payload.get("description") or "").strip() or None)
+    hypothesis = (str(payload.get("hypothesis") or "").strip() or None)
+
+    raw_arms = payload.get("arms")
+    if not isinstance(raw_arms, list) or not raw_arms:
+        return jsonify({"error": "`arms` must be a non-empty list."}), 400
+    arms: list[dict[str, str]] = []
+    for raw in raw_arms:
+        if not isinstance(raw, dict):
+            return jsonify({"error": "Each arm must be an object with strategy/model_key."}), 400
+        strategy = str(raw.get("strategy") or "").strip().lower()
+        model_key = str(raw.get("model_key") or "").strip()
+        if strategy not in {"full_pipeline", "naive_chat"}:
+            return jsonify(
+                {"error": f"Unsupported strategy `{strategy}` (expected full_pipeline|naive_chat)."}
+            ), 400
+        if not model_key:
+            return jsonify({"error": "Each arm needs a non-empty `model_key`."}), 400
+        arms.append({"strategy": strategy, "model_key": model_key})
+
+    # Resolve bug ids — accept either `bug_ids` or (`project_code`, `limit`)
+    raw_bug_ids = payload.get("bug_ids")
+    bug_ids: list[int] = []
+    if isinstance(raw_bug_ids, list) and raw_bug_ids:
+        for v in raw_bug_ids:
+            try:
+                bug_ids.append(int(v))
+            except (TypeError, ValueError):
+                continue
+    else:
+        project_code = str(payload.get("project_code") or "").strip()
+        limit_n = int(payload.get("limit") or 5)
+        if not project_code:
+            return jsonify(
+                {"error": "Provide either `bug_ids` or (`project_code`, `limit`)."}
+            ), 400
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT b.id FROM benchmark_bugs b
+                    INNER JOIN benchmark_projects p ON p.id = b.project_id
+                    WHERE p.project_code = %s AND b.is_active = 1
+                    ORDER BY b.defects4j_bug_id
+                    LIMIT %s
+                    """,
+                    (project_code, limit_n),
+                )
+                bug_ids = [int(row["id"]) for row in (cursor.fetchall() or [])]
+    if not bug_ids:
+        return jsonify({"error": "No bugs were resolved for the experiment."}), 400
+
+    config = {
+        "arms": arms,
+        "bug_ids": bug_ids,
+    }
+    experiment = bench_store.get_or_create_experiment(
+        experiment_code=experiment_code,
+        title=title,
+        description=description,
+        hypothesis=hypothesis,
+        config=config,
+        created_by_user_id=int(user["id"]),
+    )
+    experiment_id = int(experiment["id"])
+    bench_store.update_experiment_status(
+        experiment_id,
+        status="queued",
+        config=config,
+    )
+
+    import threading
+
+    threading.Thread(
+        target=_run_benchmark_experiment_in_background,
+        kwargs={
+            "experiment_id": experiment_id,
+            "user_id": int(user["id"]),
+            "bug_ids": bug_ids,
+            "arms": arms,
+        },
+        daemon=True,
+        name=f"benchmark-experiment-{experiment_id}",
+    ).start()
+
+    return jsonify(
+        {
+            "experiment_id": experiment_id,
+            "experiment_code": experiment_code,
+            "bug_count": len(bug_ids),
+            "arm_count": len(arms),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Teams / Projects endpoints
+# ---------------------------------------------------------------------------
+
+
+def _validate_org_membership(org_id: int, user_id: int) -> bool:
+    return team_store.user_is_member(org_id=org_id, user_id=user_id)
+
+
+@app.route("/api/teams/organizations", methods=["GET", "OPTIONS"])
+@_require_login
+def teams_list_orgs() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    return jsonify({"items": team_store.list_organizations_for_user(int(user["id"]))})
+
+
+@app.route("/api/teams/organizations", methods=["POST", "OPTIONS"])
+@_require_login
+def teams_create_org() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
+    try:
+        org = team_store.create_organization(
+            owner_user_id=int(user["id"]),
+            name=str(payload.get("name", "")),
+            description=str(payload.get("description", "") or "").strip() or None,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"organization": org})
+
+
+@app.route("/api/teams/organizations/<int:org_id>/members", methods=["GET", "OPTIONS"])
+@_require_login
+def teams_list_members(org_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not _validate_org_membership(org_id, int(user["id"])):
+        return jsonify({"error": "Organization was not found."}), 404
+    return jsonify({"items": team_store.list_members(org_id)})
+
+
+@app.route("/api/teams/organizations/<int:org_id>/invites", methods=["GET", "OPTIONS"])
+@_require_login
+def teams_list_invites(org_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not _validate_org_membership(org_id, int(user["id"])):
+        return jsonify({"error": "Organization was not found."}), 404
+    return jsonify({"items": team_store.list_invites_for(org_id)})
+
+
+@app.route("/api/teams/organizations/<int:org_id>/invites", methods=["POST", "OPTIONS"])
+@_require_login
+def teams_invite_member(org_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not _validate_org_membership(org_id, int(user["id"])):
+        return jsonify({"error": "Organization was not found."}), 404
+    payload = request.get_json(silent=True) or {}
+    try:
+        invite = team_store.invite_member(
+            org_id=org_id,
+            invited_by_user_id=int(user["id"]),
+            email=str(payload.get("email", "")),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"invite": invite})
+
+
+@app.route("/api/teams/invites/<invite_token>/accept", methods=["POST", "OPTIONS"])
+@_require_login
+def teams_accept_invite(invite_token: str) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    try:
+        result = team_store.accept_invite(invite_token=invite_token, user_id=int(user["id"]))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@app.route("/api/teams/organizations/<int:org_id>/members/<int:user_id>", methods=["DELETE", "OPTIONS"])
+@_require_login
+def teams_remove_member(org_id: int, user_id: int) -> Response:
+    actor = _current_user()
+    if actor is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not _validate_org_membership(org_id, int(actor["id"])):
+        return jsonify({"error": "Organization was not found."}), 404
+    try:
+        team_store.remove_member(org_id=org_id, user_id=user_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/teams/organizations/<int:org_id>/projects", methods=["GET", "OPTIONS"])
+@_require_login
+def teams_list_projects(org_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not _validate_org_membership(org_id, int(user["id"])):
+        return jsonify({"error": "Organization was not found."}), 404
+    return jsonify({"items": team_store.list_projects(org_id)})
+
+
+@app.route("/api/teams/organizations/<int:org_id>/projects", methods=["POST", "OPTIONS"])
+@_require_login
+def teams_create_project(org_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not _validate_org_membership(org_id, int(user["id"])):
+        return jsonify({"error": "Organization was not found."}), 404
+    payload = request.get_json(silent=True) or {}
+    try:
+        project = team_store.create_project(
+            org_id=org_id,
+            owner_user_id=int(user["id"]),
+            name=str(payload.get("name", "")),
+            language=str(payload.get("language", "") or "").strip() or None,
+            description=str(payload.get("description", "") or "").strip() or None,
+            repo_url=str(payload.get("repo_url", "") or "").strip() or None,
+            color_hex=str(payload.get("color_hex", "") or "").strip() or None,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"project": project})
+
+
+@app.route("/api/teams/projects/<int:project_id>", methods=["DELETE", "OPTIONS"])
+@_require_login
+def teams_delete_project(project_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    project = team_store.get_project(project_id)
+    if project is None:
+        return jsonify({"error": "Project was not found."}), 404
+    if not _validate_org_membership(int(project["organization_id"]), int(user["id"])):
+        return jsonify({"error": "Project was not found."}), 404
+    team_store.delete_project(project_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/teams/organizations", methods=["GET", "OPTIONS"])
+@_require_admin
+def admin_teams_list_orgs() -> Response:
+    return jsonify({"items": team_store.list_all_organizations_for_admin()})
+
+
+# ---------------------------------------------------------------------------
+# Personal Center endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/profile/overview", methods=["GET", "OPTIONS"])
+@_require_login
+def profile_overview() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    wallet_snapshot = wallet_store.get_wallet_snapshot(int(user["id"]))
+    return jsonify(
+        {
+            "user": user,
+            "preferences": get_preferences(int(user["id"])),
+            "overview": get_profile_overview(int(user["id"])),
+            "wallet": wallet_snapshot["wallet"],
+            "organizations": team_store.list_organizations_for_user(int(user["id"])),
+            "api_tokens": list_api_tokens(int(user["id"])),
+        }
+    )
+
+
+@app.route("/api/profile/preferences", methods=["POST", "OPTIONS"])
+@_require_login
+def profile_preferences_update() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    payload = request.get_json(silent=True) or {}
+    try:
+        prefs = update_preferences(
+            user_id=int(user["id"]),
+            default_agent_model=payload.get("default_agent_model"),
+            default_chat_model=payload.get("default_chat_model"),
+            default_language=payload.get("default_language"),
+            locale=payload.get("locale"),
+            theme=payload.get("theme"),
+            timezone=payload.get("timezone"),
+            bio=payload.get("bio"),
+            show_site_map_widget=payload.get("show_site_map_widget"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"preferences": prefs})
+
+
+@app.route("/api/profile/api-tokens", methods=["GET", "OPTIONS"])
+@_require_login
+def profile_list_api_tokens() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    return jsonify({"items": list_api_tokens(int(user["id"]))})
+
+
+@app.route("/api/profile/api-tokens", methods=["POST", "OPTIONS"])
+@_require_login
+def profile_create_api_token() -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    payload = request.get_json(silent=True) or {}
+    try:
+        token = create_api_token(
+            user_id=int(user["id"]),
+            token_name=str(payload.get("token_name", "")),
+            scope=str(payload.get("scope", "repair")),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"token": token})
+
+
+@app.route("/api/profile/api-tokens/<int:token_id>", methods=["DELETE", "OPTIONS"])
+@_require_login
+def profile_revoke_api_token(token_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    revoke_api_token(user_id=int(user["id"]), token_id=token_id)
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# PDF Export endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/pdf/history/<int:history_id>", methods=["GET", "OPTIONS"])
+@_require_login
+def pdf_export_history(history_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    try:
+        pdf_bytes, filename = build_repair_report_pdf(user_id=int(user["id"]), history_id=history_id)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    response = Response(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Length"] = str(len(pdf_bytes))
+    return response
+
+
+@app.route("/api/pdf/benchmark/<int:run_id>", methods=["GET", "OPTIONS"])
+@_require_login
+def pdf_export_benchmark(run_id: int) -> Response:
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    try:
+        pdf_bytes, filename = build_benchmark_report_pdf(user_id=int(user["id"]), run_id=run_id)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    response = Response(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Length"] = str(len(pdf_bytes))
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Site Map (publicly browsable; used by homepage widget)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/site-map", methods=["GET", "OPTIONS"])
+def site_map() -> Response:
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    return jsonify(
+        {
+            "groups": [
+                {
+                    "code": "workspace",
+                    "title": "Workspace",
+                    "items": [
+                        {"code": "agent", "label": "Agent Repair", "path": "/agent"},
+                        {"code": "chat", "label": "Chat", "path": "/chat"},
+                        {"code": "benchmark", "label": "Benchmark Arena", "path": "/benchmark"},
+                        {"code": "teams", "label": "Teams & Projects", "path": "/teams"},
+                    ],
+                },
+                {
+                    "code": "account",
+                    "title": "Account",
+                    "items": [
+                        {"code": "profile", "label": "Personal Center", "path": "/profile"},
+                        {"code": "wallet", "label": "Credit Wallet", "path": "/profile/wallet"},
+                        {"code": "billing", "label": "Upgrade", "path": "/billing"},
+                    ],
+                },
+                {
+                    "code": "admin",
+                    "title": "Admin",
+                    "items": [
+                        {"code": "dashboard", "label": "Admin Dashboard", "path": "/admin/dashboard"},
+                        {"code": "users", "label": "Users", "path": "/admin/users"},
+                        {"code": "models", "label": "Models", "path": "/admin/models"},
+                        {"code": "wallet_admin", "label": "Credit Wallets", "path": "/admin/wallet"},
+                        {"code": "benchmark_admin", "label": "Benchmark Runs", "path": "/admin/benchmark"},
+                        {"code": "teams_admin", "label": "Organizations", "path": "/admin/teams"},
+                    ],
+                },
+            ]
+        }
+    )
 
 
 if __name__ == "__main__":

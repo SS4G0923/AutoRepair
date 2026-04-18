@@ -26,6 +26,7 @@ def call_llm_for_json(
     reasoning_handler=None,
     tools=None,
     tool_event_handler=None,
+    metadata_handler=None,
     audit_context: LLMCallContext | None = None,
 ):
     runtime_model = None
@@ -72,6 +73,11 @@ def call_llm_for_json(
 
     def on_provider_metadata(metadata: dict[str, object]) -> None:
         provider_metadata.update(metadata)
+        if metadata_handler is not None:
+            try:
+                metadata_handler(metadata)
+            except Exception:
+                pass
 
     def wrapped_tool_event_handler(status: str, payload: dict[str, object]) -> None:
         if tool_event_handler is not None:

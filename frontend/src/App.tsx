@@ -11,19 +11,26 @@ import { AgentWorkspace } from "./components/app/AgentWorkspace";
 import { AppHeader } from "./components/app/AppHeader";
 import { AppSidebar } from "./components/app/AppSidebar";
 import { ChatWorkspace } from "./components/app/ChatWorkspace";
+import { SiteMapWidget } from "./components/app/SiteMapWidget";
+import { BenchmarkWorkspace } from "./components/benchmark/BenchmarkWorkspace";
 import { BillingWorkspace } from "./components/billing/BillingWorkspace";
+import { ProfileWorkspace } from "./components/profile/ProfileWorkspace";
+import { TeamsWorkspace } from "./components/teams/TeamsWorkspace";
 import { copy } from "./i18n";
 import type {
   AdminPage,
   AgentHistorySnapshot,
   AuthenticatedUser,
+  BenchmarkPage,
   ChatHistorySnapshot,
   HistoryDetail,
   HistorySummary,
   ModelCatalogItem,
   ModelOptionValue,
   OAuthProvider,
+  ProfilePage,
   PublicModelCatalog,
+  TeamsPage,
   ThemeMode,
   UiLocale,
   WorkspaceMode,
@@ -52,6 +59,9 @@ function App() {
   const [agentModel, setAgentModel] = useState<ModelOptionValue>("");
   const [chatModel, setChatModel] = useState<ModelOptionValue>("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [benchmarkPage, setBenchmarkPage] = useState<BenchmarkPage>("projects");
+  const [profilePage, setProfilePage] = useState<ProfilePage>("overview");
+  const [teamsPage, setTeamsPage] = useState<TeamsPage>("organizations");
 
   const oauthReturnRef = useRef(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -369,6 +379,27 @@ function App() {
     void billing.refreshBillingData();
   }
 
+  function startNewBenchmarkSession() {
+    chat.resetChatState({ abort: true, clearActiveHistoryId: true });
+    repair.resetRepairState();
+    setSelectedHistoryId(null);
+    setWorkspaceMode("benchmark");
+  }
+
+  function startNewProfileSession() {
+    chat.resetChatState({ abort: true, clearActiveHistoryId: true });
+    repair.resetRepairState();
+    setSelectedHistoryId(null);
+    setWorkspaceMode("profile");
+  }
+
+  function startNewTeamsSession() {
+    chat.resetChatState({ abort: true, clearActiveHistoryId: true });
+    repair.resetRepairState();
+    setSelectedHistoryId(null);
+    setWorkspaceMode("teams");
+  }
+
   function selectAdminPage(page: AdminPage) {
     if (!canAccessAdmin) {
       return;
@@ -500,19 +531,22 @@ function App() {
         ) : null}
 
         {!sessionLoading && !currentUser ? (
-          <AuthPage
-            apiBaseUrl={apiBaseUrl}
-            locale={locale}
-            oauthProviders={oauthProviders}
-            onAuthenticated={handleAuthenticated}
-            initialError={authError}
-            initialMessage={authMessage}
-            onResetNotice={() => {
-              setAuthError("");
-              setAuthMessage("");
-            }}
-            copy={dict}
-          />
+          <>
+            <AuthPage
+              apiBaseUrl={apiBaseUrl}
+              locale={locale}
+              oauthProviders={oauthProviders}
+              onAuthenticated={handleAuthenticated}
+              initialError={authError}
+              initialMessage={authMessage}
+              onResetNotice={() => {
+                setAuthError("");
+                setAuthMessage("");
+              }}
+              copy={dict}
+            />
+            <SiteMapWidget apiBaseUrl={apiBaseUrl} copy={dict} />
+          </>
         ) : null}
 
         {!sessionLoading && currentUser ? (
@@ -550,6 +584,9 @@ function App() {
                 onStartNewAgentSession={startNewAgentSession}
                 onStartNewAdminSession={openAdminConsole}
                 onStartNewChatSession={startNewChatSession}
+                onStartNewBenchmarkSession={startNewBenchmarkSession}
+                onStartNewProfileSession={startNewProfileSession}
+                onStartNewTeamsSession={startNewTeamsSession}
               />
 
               {isDesktopLayout ? (
@@ -583,6 +620,7 @@ function App() {
                   adminPage={admin.adminPage}
                   adminPaymentActingOrderId={admin.adminPaymentActingOrderId}
                   adminUserRoleUpdatingId={admin.adminUserRoleUpdatingId}
+                  apiBaseUrl={apiBaseUrl}
                   copy={dict}
                   dashboardData={admin.dashboardData}
                   loginEvents={admin.loginEvents}
@@ -634,6 +672,35 @@ function App() {
                   }}
                   onRefreshOrderSession={billing.refreshOrderSession}
                   onSelectOrder={billing.setActiveOrderId}
+                />
+              ) : workspaceMode === "benchmark" ? (
+                <BenchmarkWorkspace
+                  apiBaseUrl={apiBaseUrl}
+                  copy={dict}
+                  page={benchmarkPage}
+                  modelOptions={availableModels}
+                  model={agentModel}
+                  onModelChange={setAgentModel}
+                  onPageChange={setBenchmarkPage}
+                  workspaceMainClass={workspaceMainClass}
+                />
+              ) : workspaceMode === "profile" ? (
+                <ProfileWorkspace
+                  apiBaseUrl={apiBaseUrl}
+                  copy={dict}
+                  currentUser={currentUser}
+                  modelOptions={availableModels}
+                  page={profilePage}
+                  onPageChange={setProfilePage}
+                  workspaceMainClass={workspaceMainClass}
+                />
+              ) : workspaceMode === "teams" ? (
+                <TeamsWorkspace
+                  apiBaseUrl={apiBaseUrl}
+                  copy={dict}
+                  page={teamsPage}
+                  onPageChange={setTeamsPage}
+                  workspaceMainClass={workspaceMainClass}
                 />
               ) : workspaceMode === "agent" ? (
                 <AgentWorkspace
