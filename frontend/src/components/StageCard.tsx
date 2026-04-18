@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   stageActiveHints,
   stageExplainHints,
@@ -7,7 +8,8 @@ import {
 } from "../i18n";
 import type { StageName, StageState, UiLocale } from "../types";
 import { CandidateRankingPanel, isCandidateReportContent } from "./CandidateRankingPanel";
-import { ReasoningPanel } from "./ReasoningPanel";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { DiffView, computeDiffStats } from "./DiffView";
 import { ThinkingDots } from "./ThinkingDots";
 
 interface StageCardProps {
@@ -32,6 +34,8 @@ interface StageCardProps {
     stageExplaining: string;
     stageDone: string;
     stageRetryingLabel: string;
+    explainLabel?: string;
+    finalDiff?: string;
   };
 }
 
@@ -46,6 +50,38 @@ function getStageIndex(stage: StageName): number {
   return Math.max(0, stageOrder.indexOf(stage));
 }
 
+function parseReportForMeta(stage: StageName, content: string): string {
+  if (!content) return "";
+  if (!isCandidateReportContent(content)) {
+    return `${content.length.toLocaleString()} chars`;
+  }
+  try {
+    const parsed = JSON.parse(content) as {
+      selected_candidate?: {
+        added_lines?: number;
+        removed_lines?: number;
+        changed_file_count?: number;
+        verify_passed?: boolean;
+      };
+    };
+    const sel = parsed.selected_candidate;
+    if (!sel) return "";
+    if (stage === "code") {
+      const added = sel.added_lines ?? 0;
+      const removed = sel.removed_lines ?? 0;
+      const files = sel.changed_file_count ?? 0;
+      return `+${added} / -${removed} · ${files} file${files === 1 ? "" : "s"}`;
+    }
+    if (stage === "verify") {
+      if (sel.verify_passed === true) return "✓ passed";
+      if (sel.verify_passed === false) return "× failed";
+    }
+  } catch {
+    /* fall through */
+  }
+  return "";
+}
+
 export function StageCard({ locale, stage, state, copy }: StageCardProps) {
   const label = stageLabels[locale][stage];
   const subtitle = stageSubtitles[locale][stage];
@@ -53,6 +89,7 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
   const explainHint = stageExplainHints[locale][stage];
   const reportContent = state.report || state.diff;
   const hasStructuredPatchReport = reportContent ? isCandidateReportContent(reportContent) : false;
+  const showRawDiff = stage === "code" && Boolean(state.diff);
   const isIdle = state.status === "idle";
   const isActive = state.status === "started";
   const isExplaining = state.status === "explaining";
@@ -75,7 +112,7 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
         ? "border-amber-400/40 bg-amber-400/10 text-amber-700 dark:border-amber-300/30 dark:text-amber-200"
         : "border-black/10 bg-transparent text-slate-500 dark:border-white/10 dark:text-white/45";
 
-  const activeHintText = isExplaining ? explainHint : isActive ? activeHint : "";
+  const liveHint = isExplaining ? explainHint : isActive ? activeHint : "";
 
   const retryBadge =
     state.retryAttempt && state.retryAttempt >= 1
@@ -86,6 +123,15 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
       : "";
 
   const stepLabel = `${getStageIndex(stage) + 1}/${stageOrder.length}`;
+
+  const reportMeta = useMemo(() => {
+    if (showRawDiff) {
+      const { added, removed, files } = computeDiffStats(state.diff);
+      if (added + removed + files === 0) return "";
+      return `+${added} / -${removed} · ${files} file${files === 1 ? "" : "s"}`;
+    }
+    return parseReportForMeta(stage, reportContent);
+  }, [showRawDiff, state.diff, stage, reportContent]);
 
   if (isIdle && !hasContent) {
     return (
@@ -108,27 +154,30 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
     );
   }
 
+  const explainOpen = true;
+  const reasoningOpen = false;
+  const reportOpen = true;
+  const toolCallsOpen = false;
+
+  const explainCharCount = state.explain.length;
+  const reasoningCharCount = state.reasoning.length;
+  const toolCallsMeta = state.toolEvents.length
+    ? `${state.toolEvents.length} call${state.toolEvents.length === 1 ? "" : "s"}`
+    : "";
+
   return (
     <section className="min-w-0 rounded-[24px] border border-black/5 bg-white/50 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full border border-black/10 px-2 py-0.5 font-mono text-[10px] text-slate-500 dark:border-white/15 dark:text-white/50">
-              {stepLabel}
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="rounded-full border border-black/10 px-2 py-0.5 font-mono text-[10px] text-slate-500 dark:border-white/15 dark:text-white/50">
+            {stepLabel}
+          </span>
+          <span className="truncate text-sm font-medium text-slate-900 dark:text-white">{label}</span>
+          {(isActive || isExplaining) ? <ThinkingDots /> : null}
+          {retryBadge ? (
+            <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-300/30 dark:text-amber-200">
+              {retryBadge}
             </span>
-            <span className="text-xs uppercase tracking-[0.28em] text-slate-500 dark:text-white/55">
-              {label}
-            </span>
-            {(isActive || isExplaining) ? <ThinkingDots /> : null}
-            {retryBadge ? (
-              <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-300/30 dark:text-amber-200">
-                {retryBadge}
-              </span>
-            ) : null}
-          </div>
-          <div className="mt-1 text-[11px] text-slate-500 dark:text-white/45">{subtitle}</div>
-          {activeHintText ? (
-            <div className="mt-2 text-[11px] italic text-slate-500 dark:text-white/55">{activeHintText}</div>
           ) : null}
         </div>
         <span
@@ -136,93 +185,134 @@ export function StageCard({ locale, stage, state, copy }: StageCardProps) {
         >
           {statusText}
         </span>
-      </div>
+      </header>
 
-      {state.explain ? (
-        <div className="mt-3 rounded-2xl border border-black/5 bg-slate-950 px-4 py-3 font-mono text-sm leading-7 text-slate-100 dark:border-white/10 dark:bg-ink-900">
-          <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{state.explain}</pre>
-        </div>
+      {liveHint ? (
+        <div className="mt-2 text-[11px] italic text-slate-500 dark:text-white/55">{liveHint}</div>
       ) : null}
 
-      {state.reasoning ? (
-        <div className="mt-3">
-          <ReasoningPanel
-            label={copy.reasoningLabel}
-            showLabel={copy.reasoningShow}
-            hideLabel={copy.reasoningHide}
-            content={state.reasoning}
-          />
-        </div>
-      ) : null}
+      <div className="mt-3 space-y-2">
+        {state.explain ? (
+          <CollapsibleSection
+            title={copy.explainLabel ?? "Summary"}
+            meta={explainCharCount > 0 ? `${explainCharCount.toLocaleString()} chars` : ""}
+            defaultOpen={explainOpen}
+            tone="accent"
+          >
+            <div className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-700 [overflow-wrap:anywhere] dark:text-white/80">
+              {state.explain}
+            </div>
+          </CollapsibleSection>
+        ) : null}
 
-      {reportContent ? (
-        <div className="mt-3">
-          <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-            {copy.reportLabel}
-          </div>
-          <CandidateRankingPanel locale={locale} reportContent={reportContent} stage={stage} />
-          {!hasStructuredPatchReport ? (
-            <pre className="overflow-y-auto whitespace-pre-wrap break-words rounded-2xl border border-black/5 bg-black/[0.03] p-4 font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/65">
-              {reportContent}
+        {state.reasoning ? (
+          <CollapsibleSection
+            title={copy.reasoningLabel}
+            meta={reasoningCharCount > 0 ? `${reasoningCharCount.toLocaleString()} chars` : ""}
+            defaultOpen={reasoningOpen}
+            tone="warning"
+          >
+            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/75">
+              {state.reasoning}
             </pre>
-          ) : null}
-        </div>
-      ) : null}
+          </CollapsibleSection>
+        ) : null}
 
-      {state.toolEvents.length > 0 ? (
-        <div className="mt-3">
-          <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-            {copy.toolCallsLabel}
-          </div>
-          <div className="max-h-60 space-y-3 overflow-y-auto rounded-2xl border border-black/5 bg-black/[0.03] p-3 dark:border-white/10 dark:bg-white/[0.03]">
-            {state.toolEvents.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-[18px] border border-black/5 bg-white/50 p-3 dark:border-white/10 dark:bg-slate-950/70"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate font-mono text-xs text-slate-900 dark:text-white">
+        {showRawDiff ? (
+          <CollapsibleSection
+            title={copy.finalDiff ?? copy.reportLabel}
+            meta={reportMeta}
+            defaultOpen={reportOpen}
+            bodyPadding="none"
+          >
+            <DiffView content={state.diff} bare />
+          </CollapsibleSection>
+        ) : reportContent ? (
+          <CollapsibleSection
+            title={copy.reportLabel}
+            meta={reportMeta}
+            defaultOpen={reportOpen}
+            bodyPadding={hasStructuredPatchReport ? "tight" : "default"}
+          >
+            {hasStructuredPatchReport ? (
+              <CandidateRankingPanel locale={locale} reportContent={reportContent} stage={stage} compact />
+            ) : (
+              <pre className="overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/65">
+                {reportContent}
+              </pre>
+            )}
+          </CollapsibleSection>
+        ) : null}
+
+        {state.toolEvents.length > 0 ? (
+          <CollapsibleSection
+            title={copy.toolCallsLabel}
+            meta={toolCallsMeta}
+            defaultOpen={toolCallsOpen}
+            bodyPadding="tight"
+          >
+            <div className="max-h-72 space-y-2 overflow-y-auto">
+              {state.toolEvents.map((item) => (
+                <CollapsibleSection
+                  key={item.id}
+                  title={
+                    <span className="font-mono text-[11px] normal-case tracking-normal text-slate-800 dark:text-white/80">
                       {item.tool_name}
+                    </span>
+                  }
+                  meta={
+                    <div className="flex items-center gap-2">
+                      {item.round ? (
+                        <span className="text-[10px] text-slate-500 dark:text-white/40">
+                          round {item.round}
+                        </span>
+                      ) : null}
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] ${
+                          item.status === "completed"
+                            ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-700 dark:border-emerald-300/25 dark:text-emerald-200"
+                            : "border-amber-400/25 bg-amber-400/10 text-amber-700 dark:border-amber-300/25 dark:text-amber-200"
+                        }`}
+                      >
+                        {item.status === "completed" ? copy.toolCompleted : copy.toolStarted}
+                      </span>
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500 dark:text-white/40">
-                      {item.round ? `round ${item.round}` : null}
-                      {item.round && item.at ? " · " : null}
+                  }
+                  defaultOpen={false}
+                  bodyPadding="tight"
+                >
+                  {item.arguments ? (
+                    <div>
+                      <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-white/35">
+                        {copy.toolArguments}
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/72">
+                        {item.arguments}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {item.output_preview ? (
+                    <div className={item.arguments ? "mt-2" : ""}>
+                      <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-white/35">
+                        {copy.toolOutput}
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/72">
+                        {item.output_preview}
+                        {item.output_truncated ? "\n..." : ""}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {!item.arguments && !item.output_preview ? (
+                    <div className="text-[11px] text-slate-500 dark:text-white/45">
                       {item.at}
                     </div>
-                  </div>
-                  <div className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-600 dark:border-white/10 dark:text-white/60">
-                    {item.status === "completed" ? copy.toolCompleted : copy.toolStarted}
-                  </div>
-                </div>
-
-                {item.arguments ? (
-                  <div className="mt-3">
-                    <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-white/35">
-                      {copy.toolArguments}
-                    </div>
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/72">
-                      {item.arguments}
-                    </pre>
-                  </div>
-                ) : null}
-
-                {item.output_preview ? (
-                  <div className="mt-3">
-                    <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-white/35">
-                      {copy.toolOutput}
-                    </div>
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/72">
-                      {item.output_preview}
-                      {item.output_truncated ? "\n..." : ""}
-                    </pre>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+                  ) : null}
+                </CollapsibleSection>
+              ))}
+            </div>
+          </CollapsibleSection>
+        ) : null}
+      </div>
     </section>
   );
 }

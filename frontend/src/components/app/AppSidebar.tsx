@@ -275,7 +275,7 @@ export function AppSidebar({
               {historyItems.map((item) => (
                 <div
                   key={item.id}
-                  className={`flex items-start gap-2 rounded-[16px] px-2 py-2 transition ${
+                  className={`app-slide-down flex items-start gap-2 rounded-[16px] px-2 py-2 transition ${
                     selectedHistoryId === item.id
                       ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950"
                       : "bg-black/[0.03] text-slate-700 hover:bg-black/[0.05] dark:bg-white/[0.03] dark:text-white/75 dark:hover:bg-white/[0.06]"

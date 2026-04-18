@@ -157,6 +157,7 @@ export function AdminWorkspace({
       ) : null}
 
       <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+        <div key={adminPage} className="app-fade-in">
         {adminPage === "dashboard" ? (
           <AdminDashboardPage copy={copy} data={dashboardData} />
         ) : adminPage === "users" ? (
@@ -207,6 +208,7 @@ export function AdminWorkspace({
             onPageChange={onActivityPageChange}
           />
         )}
+        </div>
       </div>
     </section>
   );

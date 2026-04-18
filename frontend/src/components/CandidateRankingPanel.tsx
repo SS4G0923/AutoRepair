@@ -34,6 +34,12 @@ interface CandidateRankingPanelProps {
   locale: UiLocale;
   reportContent: string;
   stage: StageName;
+  /**
+   * When true the panel skips the outer heading/subheading wrapper (because
+   * the parent collapsible section already labels the report) and hides the
+   * raw JSON toggle to reduce visual noise.
+   */
+  compact?: boolean;
 }
 
 const uiCopy = {
@@ -133,6 +139,7 @@ export function CandidateRankingPanel({
   locale,
   reportContent,
   stage,
+  compact = false,
 }: CandidateRankingPanelProps) {
   const report = parseCandidateReport(reportContent);
   if (!report) {
@@ -165,28 +172,30 @@ export function CandidateRankingPanel({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-[24px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-slate-900 dark:text-white">
-              {heading}
-            </div>
-            <div className="mt-1 text-sm text-slate-600 dark:text-white/60">
-              {subheading}
-            </div>
-            {report.selection_policy ? (
-              <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-white/45">
-                {report.selection_policy}
+      {!compact ? (
+        <div className="rounded-[24px] border border-black/5 bg-white/50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                {heading}
               </div>
+              <div className="mt-1 text-sm text-slate-600 dark:text-white/60">
+                {subheading}
+              </div>
+              {report.selection_policy ? (
+                <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-white/45">
+                  {report.selection_policy}
+                </div>
+              ) : null}
+            </div>
+            {isMultiCandidateMode && highlightKey ? (
+              <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-medium ${badgeClass("selected")}`}>
+                {stage === "verify" ? dict.selected : dict.provisional}
+              </span>
             ) : null}
           </div>
-          {isMultiCandidateMode && highlightKey ? (
-            <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-medium ${badgeClass("selected")}`}>
-              {stage === "verify" ? dict.selected : dict.provisional}
-            </span>
-          ) : null}
         </div>
-      </div>
+      ) : null}
 
       <div className="grid gap-3">
         {cards.map((candidate, index) => {
@@ -246,14 +255,44 @@ export function CandidateRankingPanel({
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-2 text-xs text-slate-500 dark:text-white/45 sm:grid-cols-4">
-                <div>{dict.files}: {formatMetric(candidate.changed_file_count)}</div>
-                <div>
-                  {dict.lines}: +{formatMetric(candidate.added_lines)} / -{formatMetric(candidate.removed_lines)}
-                </div>
-                <div>{dict.assertions}: {formatMetric(candidate.assert_count)}</div>
-                <div>{dict.summary}: {candidate.verification_summary || "-"}</div>
-              </div>
+              {(() => {
+                const metrics: { label: string; value: string }[] = [];
+                if ((candidate.changed_file_count ?? 0) > 0) {
+                  metrics.push({
+                    label: dict.files,
+                    value: formatMetric(candidate.changed_file_count),
+                  });
+                }
+                if ((candidate.added_lines ?? 0) > 0 || (candidate.removed_lines ?? 0) > 0) {
+                  metrics.push({
+                    label: dict.lines,
+                    value: `+${formatMetric(candidate.added_lines)} / -${formatMetric(candidate.removed_lines)}`,
+                  });
+                }
+                if ((candidate.assert_count ?? 0) > 0) {
+                  metrics.push({
+                    label: dict.assertions,
+                    value: formatMetric(candidate.assert_count),
+                  });
+                }
+                if (candidate.verification_summary) {
+                  metrics.push({
+                    label: dict.summary,
+                    value: candidate.verification_summary,
+                  });
+                }
+                if (metrics.length === 0) return null;
+                return (
+                  <div className="mt-4 grid gap-2 text-xs text-slate-500 dark:text-white/45 sm:grid-cols-2 lg:grid-cols-4">
+                    {metrics.map((m) => (
+                      <div key={m.label} className="min-w-0">
+                        <span className="text-slate-500 dark:text-white/40">{m.label}: </span>
+                        <span className="text-slate-700 dark:text-white/70">{m.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {Array.isArray(candidate.modified_files) && candidate.modified_files.length > 0 ? (
                 <div className="mt-3">
@@ -283,14 +322,16 @@ export function CandidateRankingPanel({
         })}
       </div>
 
-      <details className="rounded-[20px] border border-black/5 bg-black/[0.02] px-4 py-3 dark:border-white/10 dark:bg-white/[0.02]">
-        <summary className="cursor-pointer text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-          {dict.rawReport}
-        </summary>
-        <pre className="mt-3 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/65">
-          {reportContent}
-        </pre>
-      </details>
+      {!compact ? (
+        <details className="rounded-[20px] border border-black/5 bg-black/[0.02] px-4 py-3 dark:border-white/10 dark:bg-white/[0.02]">
+          <summary className="cursor-pointer text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+            {dict.rawReport}
+          </summary>
+          <pre className="mt-3 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-white/65">
+            {reportContent}
+          </pre>
+        </details>
+      ) : null}
     </div>
   );
 }

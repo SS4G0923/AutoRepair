@@ -121,7 +121,7 @@ function ModelFormCard({
   footer,
 }: ModelFormCardProps) {
   return (
-    <AdminSurface className="space-y-2">
+    <AdminSurface className="space-y-2 app-slide-up">
       <AdminSectionTitle title={headline} hint={hint} />
 
       <div className="grid gap-2 xl:grid-cols-4">

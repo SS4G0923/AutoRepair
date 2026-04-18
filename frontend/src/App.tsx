@@ -451,7 +451,7 @@ function App() {
     }
   }
 
-  const workspaceMainClass = `min-h-0 min-w-0 h-full ${!isDesktopLayout ? "flex-1" : ""}`.trim();
+  const workspaceMainClass = `min-h-0 min-w-0 h-full app-fade-in ${!isDesktopLayout ? "flex-1" : ""}`.trim();
 
   const statusText =
     repair.status === "streaming"

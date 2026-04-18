@@ -126,29 +126,47 @@ export function normalizeStageMap(
     if (!next) {
       continue;
     }
+    const toolEvents = Array.isArray(next.toolEvents)
+      ? next.toolEvents.map((item, index) => ({
+          id:
+            typeof item.id === "string" && item.id
+              ? item.id
+              : `history-tool-${stage}-${index}`,
+          tool_name:
+            typeof item.tool_name === "string" && item.tool_name ? item.tool_name : "tool",
+          status: item.status === "completed" ? ("completed" as const) : ("started" as const),
+          round: typeof item.round === "number" ? item.round : undefined,
+          arguments: typeof item.arguments === "string" ? item.arguments : undefined,
+          output_preview:
+            typeof item.output_preview === "string" ? item.output_preview : undefined,
+          output_truncated: Boolean(item.output_truncated ?? false),
+          at: typeof item.at === "string" ? item.at : "",
+        }))
+      : [];
+
+    let status = next.status ?? base[stage].status;
+    const hasContent = Boolean(
+      (next.explain && next.explain.length > 0) ||
+        (next.report && next.report.length > 0) ||
+        (next.diff && next.diff.length > 0) ||
+        toolEvents.length > 0,
+    );
+    // Snapshots are only persisted at terminal events (`result` / `error`), so a stage
+    // that has real content but is stuck at `started` / `explaining` is the tail of a
+    // backend save race where the final `stage/completed` event arrived after the
+    // snapshot was written. Treat it as completed when restoring from history so the
+    // UI does not falsely show an in-progress pipeline.
+    if (hasContent && (status === "started" || status === "explaining")) {
+      status = "completed";
+    }
+
     base[stage] = {
-      status: next.status ?? base[stage].status,
+      status,
       reasoning: next.reasoning ?? base[stage].reasoning,
       explain: next.explain ?? base[stage].explain,
       report: next.report ?? base[stage].report,
       diff: next.diff ?? base[stage].diff,
-      toolEvents: Array.isArray(next.toolEvents)
-        ? next.toolEvents.map((item, index) => ({
-            id:
-              typeof item.id === "string" && item.id
-                ? item.id
-                : `history-tool-${stage}-${index}`,
-            tool_name:
-              typeof item.tool_name === "string" && item.tool_name ? item.tool_name : "tool",
-            status: item.status === "completed" ? "completed" : "started",
-            round: typeof item.round === "number" ? item.round : undefined,
-            arguments: typeof item.arguments === "string" ? item.arguments : undefined,
-            output_preview:
-              typeof item.output_preview === "string" ? item.output_preview : undefined,
-            output_truncated: Boolean(item.output_truncated ?? false),
-            at: typeof item.at === "string" ? item.at : "",
-          }))
-        : [],
+      toolEvents,
     };
   }
 

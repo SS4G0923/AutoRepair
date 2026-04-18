@@ -13,6 +13,7 @@ import {
   formatAdminNumber,
   toStatusTone,
 } from "./AdminCommon";
+import { Collapse } from "../Collapse";
 
 interface AdminRequestsPageProps {
   copy: AppCopy;
@@ -224,7 +225,7 @@ export function AdminRequestsPage({
                 </div>
 
                 {/* Expanded Details */}
-                {active ? (
+                <Collapse open={active} duration={280}>
                   <div className="mt-3 border-t border-black/5 pt-3 dark:border-white/10">
                     {requestDetailLoading ? (
                       <div className="grid min-h-[10rem] place-items-center text-sm text-slate-500 dark:text-white/45">
@@ -233,7 +234,7 @@ export function AdminRequestsPage({
                     ) : !requestDetail || requestDetail.request.id !== item.id ? (
                       <AdminEmptyState message={copy.adminNoData} />
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-2 app-fade-in">
                         <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-4">
                           <RequestMetaRow label={copy.adminRequestId} value={String(requestDetail.request.id)} />
                           <RequestMetaRow
@@ -317,7 +318,7 @@ export function AdminRequestsPage({
                       </div>
                     )}
                   </div>
-                ) : null}
+                </Collapse>
               </div>
             );
           })

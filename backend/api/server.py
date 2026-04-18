@@ -1245,8 +1245,30 @@ def repair_stream() -> Response:
         "final_status": "",
         "error_message": "",
     }
+    # The `result` event is emitted before background explain threads finish streaming,
+    # so their `stage/completed` events arrive *after* the initial save. We remember the
+    # saved history id here and re-save once the pipeline worker has joined every
+    # background thread, so the persisted snapshot reflects the final stage statuses.
+    saved_history_id: int | None = None
+
+    def _final_preview_text() -> str:
+        if captured.get("error_message"):
+            return _truncate_text(
+                str(captured["error_message"]) or "Agent run failed."
+            )
+        status = str(captured.get("final_status") or "")
+        if status == "clean":
+            return "No runtime error detected."
+        if status == "verified":
+            return "Repair diff verified and ready for review."
+        if status == "verify_failed":
+            return "Repair diff generated, but verification failed."
+        if status:
+            return "Repair diff is ready."
+        return ""
 
     def emit(event: str, data: dict[str, Any]) -> None:
+        nonlocal saved_history_id
         outgoing = dict(data)
 
         if event == "stage":
@@ -1323,7 +1345,9 @@ def repair_stream() -> Response:
                 model=repair_request.model,
                 language=repair_request.language,
                 snapshot=captured,
+                history_id=saved_history_id,
             )
+            saved_history_id = saved["id"]
             outgoing["history_id"] = saved["id"]
         elif event == "result":
             if outgoing.get("filename"):
@@ -1348,7 +1372,9 @@ def repair_stream() -> Response:
                 model=repair_request.model,
                 language=repair_request.language,
                 snapshot=captured,
+                history_id=saved_history_id,
             )
+            saved_history_id = saved["id"]
             outgoing["history_id"] = saved["id"]
 
         captured["events"].append(
@@ -1363,11 +1389,34 @@ def repair_stream() -> Response:
         event_queue.put(_format_sse(event, outgoing))
 
     def worker() -> None:
+        nonlocal saved_history_id
         try:
             run_repair_pipeline(repair_request, emit, user_id=user_id)
         except Exception as exc:
             emit("error", {"message": str(exc)})
         finally:
+            # By the time `run_repair_pipeline` returns, every background explain thread
+            # has already been joined inside the pipeline. So captured["stages"] now
+            # contains the final `completed` status for every stage. Re-persist the
+            # snapshot so the UI restores a fully-finished pipeline next time the user
+            # re-opens this conversation from history. Best-effort: swallow any error
+            # here so we never block tearing down the SSE stream.
+            if saved_history_id is not None:
+                try:
+                    save_history(
+                        user_id=user_id,
+                        mode="agent",
+                        title=_agent_history_title(
+                            repair_request, captured.get("filename")
+                        ),
+                        preview_text=_final_preview_text(),
+                        model=repair_request.model,
+                        language=repair_request.language,
+                        snapshot=captured,
+                        history_id=saved_history_id,
+                    )
+                except Exception:
+                    pass
             event_queue.put(sentinel)
 
     threading.Thread(target=worker, daemon=True).start()

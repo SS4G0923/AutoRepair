@@ -1,4 +1,5 @@
 import { CodeEditor } from "../CodeEditor";
+import { DiffView, computeDiffStats } from "../DiffView";
 import { StageCard } from "../StageCard";
 import { Dropdown } from "../Dropdown";
 import { AppCopy, languageOptions, stageOrder } from "../../i18n";
@@ -470,12 +471,29 @@ export function AgentWorkspace({
 
               {finalDiff ? (
                 <div className="mt-4">
-                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-                    {copy.finalDiff}
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
+                      {copy.finalDiff}
+                    </div>
+                    {(() => {
+                      const { added, removed, files } = computeDiffStats(finalDiff);
+                      if (added + removed + files === 0) return null;
+                      return (
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-white/50">
+                          <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-200">
+                            +{added}
+                          </span>
+                          <span className="rounded-full border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-rose-700 dark:text-rose-200">
+                            -{removed}
+                          </span>
+                          <span>
+                            {files} file{files === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
-                  <pre className="overflow-y-auto whitespace-pre-wrap break-words rounded-3xl bg-slate-950 p-5 font-mono text-xs leading-6 text-slate-100 [overflow-wrap:anywhere] dark:bg-ink-900">
-                    {finalDiff}
-                  </pre>
+                  <DiffView content={finalDiff} maxHeight="32rem" />
 
                   {verificationPassed && !isProjectMode ? (
                     <div className="mt-4 flex flex-wrap items-center gap-3">
