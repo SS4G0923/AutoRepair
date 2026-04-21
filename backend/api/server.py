@@ -1275,6 +1275,11 @@ def repair_stream() -> Response:
         "github_repo_url": repair_request.github_repo_url,
         "github_ref": repair_request.github_ref,
         "project_subdir": repair_request.project_subdir,
+        "user_prompt": repair_request.user_prompt or "",
+        "test_cases": [
+            {"stdin": c.stdin, "expected_stdout": c.expected_stdout, "name": c.name}
+            for c in repair_request.test_cases
+        ],
         "run_result": None,
         "stages": _empty_stage_map(),
         "events": [],
@@ -1325,6 +1330,9 @@ def repair_stream() -> Response:
                 "source_type": outgoing.get("source_type"),
                 "file_count": outgoing.get("file_count"),
                 "execution": outgoing.get("execution"),
+                "user_prompt": outgoing.get("user_prompt", ""),
+                "test_cases_summary": outgoing.get("test_cases_summary"),
+                "test_case_results": outgoing.get("test_case_results") or [],
             }
         elif event == "inspect_report":
             captured["stages"]["inspect"]["report"] = json.dumps(

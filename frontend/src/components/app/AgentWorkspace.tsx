@@ -1,4 +1,5 @@
 import { CodeEditor } from "../CodeEditor";
+import { CollapsibleSection } from "../CollapsibleSection";
 import { DiffView, computeDiffStats } from "../DiffView";
 import { StageCard } from "../StageCard";
 import { Dropdown } from "../Dropdown";
@@ -9,10 +10,13 @@ import type {
   ModelCatalogItem,
   ModelOptionValue,
   ProjectEntrypointOption,
+  RepairTestCase,
   RunResult,
   SessionStatus,
   StageName,
   StageState,
+  TestCaseResult,
+  TestCasesSummary,
   UiLocale,
 } from "../../types";
 
@@ -21,6 +25,145 @@ function formatProgressLabel(template: string, values: Record<string, string | n
     const value = values[key];
     return value === undefined || value === null ? "" : String(value);
   });
+}
+
+function TestCaseResultsPanel({
+  copy,
+  title,
+  summary,
+  results,
+}: {
+  copy: AppCopy;
+  title: string;
+  summary?: TestCasesSummary | null;
+  results?: TestCaseResult[] | null;
+}) {
+  if (!results || results.length === 0) return null;
+  const total = summary?.total ?? results.length;
+  const passed = summary?.passed ?? results.filter((r) => r.passed).length;
+  const failed = total - passed;
+  const allPassed = summary?.all_passed ?? failed === 0;
+  return (
+    <section className="mt-4 rounded-2xl border border-black/5 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/55">
+          {title}
+        </div>
+        <div
+          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${
+            allPassed
+              ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300"
+              : "bg-rose-500/10 text-rose-700 ring-rose-500/30 dark:text-rose-300"
+          }`}
+        >
+          {formatProgressLabel(
+            allPassed ? copy.testCasesSummaryPassed : copy.testCasesSummaryFailed,
+            { passed, failed, total },
+          )}
+        </div>
+      </div>
+      <ul className="mt-2 space-y-2">
+        {results.map((result) => {
+          const statusLabel = result.passed
+            ? copy.testCasePassed
+            : result.timed_out
+              ? copy.testCaseTimedOut
+              : !result.runtime_ok
+                ? copy.testCaseRuntimeError
+                : copy.testCaseFailed;
+          const statusClass = result.passed
+            ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300"
+            : "bg-rose-500/10 text-rose-700 ring-rose-500/30 dark:text-rose-300";
+          return (
+            <li
+              key={result.index}
+              className={`rounded-xl border p-2.5 ${
+                result.passed
+                  ? "border-emerald-400/30 bg-emerald-50/60 dark:border-emerald-300/20 dark:bg-emerald-500/5"
+                  : "border-rose-400/30 bg-rose-50/60 dark:border-rose-300/20 dark:bg-rose-500/5"
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-white/10 dark:text-white/80">
+                  #{result.index + 1} · {result.name}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${statusClass}`}
+                >
+                  {result.passed ? "✓" : "✗"} {statusLabel}
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-white/45">
+                  rc={result.returncode} · {result.duration_sec.toFixed(2)}s
+                </span>
+              </div>
+              {result.stdin.trim() ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                    {copy.testCaseStdin}
+                  </div>
+                  <pre className="mt-0.5 max-h-16 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                    {result.stdin}
+                  </pre>
+                </div>
+              ) : null}
+              {result.expected_provided ? (
+                <div className="mt-1.5 grid gap-2 md:grid-cols-2">
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                      {copy.testCaseExpectedOutput}
+                    </div>
+                    <pre className="mt-0.5 max-h-28 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                      {result.expected_stdout || "(empty)"}
+                    </pre>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                      {copy.testCaseActualOutput}
+                    </div>
+                    <pre className="mt-0.5 max-h-28 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                      {result.stdout || "(empty)"}
+                    </pre>
+                  </div>
+                </div>
+              ) : null}
+              {result.stderr.trim() ? (
+                <div className="mt-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-white/50">
+                    {copy.testCaseStderrTail}
+                  </div>
+                  <pre className="mt-0.5 max-h-20 overflow-auto rounded-lg bg-black/[0.05] p-2 font-mono text-[11px] leading-4 text-slate-700 dark:bg-black/30 dark:text-white/80">
+                    {result.stderr.length > 1200 ? result.stderr.slice(-1200) : result.stderr}
+                  </pre>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function extractVerifyTestCaseResults(
+  report: string | null | undefined,
+): { summary?: TestCasesSummary; results?: TestCaseResult[] } {
+  if (!report) return {};
+  try {
+    const parsed = JSON.parse(report) as Record<string, unknown>;
+    const selected = parsed.selected_candidate as Record<string, unknown> | undefined;
+    const verificationReport = selected?.verification_report as Record<string, unknown> | undefined;
+    const results = verificationReport?.test_case_results;
+    const summary = verificationReport?.test_cases_summary;
+    if (Array.isArray(results)) {
+      return {
+        summary: summary as TestCasesSummary | undefined,
+        results: results as TestCaseResult[],
+      };
+    }
+  } catch {
+    return {};
+  }
+  return {};
 }
 
 interface StageProgressBarProps {
@@ -73,6 +216,8 @@ interface AgentWorkspaceProps {
   githubRef: string;
   githubRepoUrl: string;
   inputText: string;
+  userPrompt: string;
+  testCases: RepairTestCase[];
   language: CodeLanguage;
   locale: UiLocale;
   model: ModelOptionValue;
@@ -95,6 +240,8 @@ interface AgentWorkspaceProps {
   onGithubRefChange: (value: string) => void;
   onGithubRepoUrlChange: (value: string) => void;
   onInputTextChange: (value: string) => void;
+  onUserPromptChange: (value: string) => void;
+  onTestCasesChange: (value: RepairTestCase[]) => void;
   onLanguageChange: (value: CodeLanguage) => void;
   onModelChange: (value: ModelOptionValue) => void;
   onProjectSubdirChange: (value: string) => void;
@@ -119,6 +266,8 @@ export function AgentWorkspace({
   githubRef,
   githubRepoUrl,
   inputText,
+  userPrompt,
+  testCases,
   language,
   locale,
   model,
@@ -141,6 +290,8 @@ export function AgentWorkspace({
   onGithubRefChange,
   onGithubRepoUrlChange,
   onInputTextChange,
+  onUserPromptChange,
+  onTestCasesChange,
   onLanguageChange,
   onModelChange,
   onProjectSubdirChange,
@@ -362,18 +513,139 @@ export function AgentWorkspace({
                 </div>
               ) : null}
 
-              <label className="block">
-                <div className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
-                  {copy.programInput}
+              <CollapsibleSection
+                title={copy.userPrompt}
+                defaultOpen={userPrompt.trim().length > 0}
+                meta={
+                  userPrompt.trim().length > 0
+                    ? `${userPrompt.trim().length} ch`
+                    : undefined
+                }
+              >
+                <div className="text-[11px] text-slate-500 dark:text-white/50">
+                  {copy.userPromptHint}
+                </div>
+                <textarea
+                  value={userPrompt}
+                  onChange={(event) => onUserPromptChange(event.target.value)}
+                  placeholder={copy.userPromptPlaceholder}
+                  rows={5}
+                  className="mt-2 w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                />
+              </CollapsibleSection>
+
+              <CollapsibleSection
+                title={copy.programInput}
+                defaultOpen={inputText.trim().length > 0}
+                meta={
+                  inputText.trim().length > 0
+                    ? `${inputText.trim().length} ch`
+                    : undefined
+                }
+              >
+                <div className="text-[11px] text-slate-500 dark:text-white/50">
+                  {copy.programInputHint}
                 </div>
                 <textarea
                   value={inputText}
                   onChange={(event) => onInputTextChange(event.target.value)}
                   placeholder={copy.programInputHint}
                   rows={agentSourceType === "single_file" ? 4 : 3}
-                  className="w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
+                  className="mt-2 w-full rounded-[18px] border border-black/10 bg-white/50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/28"
                 />
-              </label>
+              </CollapsibleSection>
+
+              <CollapsibleSection
+                title={copy.testCases}
+                defaultOpen={testCases.length > 0}
+                meta={
+                  testCases.length > 0 ? `${testCases.length}` : undefined
+                }
+              >
+                <div className="text-[11px] text-slate-500 dark:text-white/50">
+                  {copy.testCasesHint}
+                </div>
+                {testCases.length === 0 ? (
+                  <div className="mt-2 rounded-2xl border border-dashed border-black/10 bg-black/[0.02] px-3 py-4 text-center text-xs text-slate-500 dark:border-white/10 dark:bg-white/[0.02] dark:text-white/45">
+                    {copy.testCaseEmpty}
+                  </div>
+                ) : (
+                  <ul className="mt-2 space-y-3">
+                    {testCases.map((testCase, index) => {
+                      const updateCase = (next: Partial<RepairTestCase>) => {
+                        onTestCasesChange(
+                          testCases.map((c, i) => (i === index ? { ...c, ...next } : c)),
+                        );
+                      };
+                      const removeCase = () => {
+                        onTestCasesChange(testCases.filter((_, i) => i !== index));
+                      };
+                      return (
+                        <li
+                          key={index}
+                          className="rounded-2xl border border-black/5 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.03]"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <input
+                              value={testCase.name ?? ""}
+                              onChange={(event) => updateCase({ name: event.target.value })}
+                              placeholder={copy.testCaseNamePlaceholder}
+                              className="min-w-0 flex-1 rounded-full border border-black/10 bg-white/60 px-3 py-1.5 text-xs text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30"
+                            />
+                            <button
+                              type="button"
+                              onClick={removeCase}
+                              className="shrink-0 rounded-full border border-black/10 bg-white/40 px-3 py-1.5 text-[11px] text-slate-600 transition hover:border-rose-400 hover:text-rose-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60 dark:hover:border-rose-400 dark:hover:text-rose-300"
+                            >
+                              {copy.testCaseRemove}
+                            </button>
+                          </div>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            <label className="block">
+                              <div className="mb-1 text-[11px] uppercase tracking-[0.22em] text-slate-500 dark:text-white/45">
+                                {copy.testCaseStdin}
+                              </div>
+                              <textarea
+                                value={testCase.stdin}
+                                onChange={(event) => updateCase({ stdin: event.target.value })}
+                                placeholder={copy.testCaseStdinPlaceholder}
+                                rows={3}
+                                className="w-full rounded-xl border border-black/10 bg-white/60 px-3 py-2 font-mono text-[12px] leading-5 text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30"
+                              />
+                            </label>
+                            <label className="block">
+                              <div className="mb-1 text-[11px] uppercase tracking-[0.22em] text-slate-500 dark:text-white/45">
+                                {copy.testCaseExpected}
+                              </div>
+                              <textarea
+                                value={testCase.expected_stdout}
+                                onChange={(event) =>
+                                  updateCase({ expected_stdout: event.target.value })
+                                }
+                                placeholder={copy.testCaseExpectedPlaceholder}
+                                rows={3}
+                                className="w-full rounded-xl border border-black/10 bg-white/60 px-3 py-2 font-mono text-[12px] leading-5 text-slate-900 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30"
+                              />
+                            </label>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    onTestCasesChange([
+                      ...testCases,
+                      { stdin: "", expected_stdout: "", name: "" },
+                    ])
+                  }
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/60 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:border-white/40"
+                >
+                  + {copy.testCaseAdd}
+                </button>
+              </CollapsibleSection>
             </div>
 
             {!languageSupported ? (
@@ -456,6 +728,26 @@ export function AgentWorkspace({
                   ))}
                 </div>
               ) : null}
+
+              <TestCaseResultsPanel
+                copy={copy}
+                title={copy.testCasesInitialRunLabel}
+                summary={runResult?.test_cases_summary}
+                results={runResult?.test_case_results}
+              />
+
+              {(() => {
+                const { summary: verifySummary, results: verifyResults } =
+                  extractVerifyTestCaseResults(stages.verify?.report);
+                return (
+                  <TestCaseResultsPanel
+                    copy={copy}
+                    title={copy.testCasesVerifyRunLabel}
+                    summary={verifySummary}
+                    results={verifyResults}
+                  />
+                );
+              })()}
 
               {errorMessage ? (
                 <div className="mt-4 rounded-3xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200">

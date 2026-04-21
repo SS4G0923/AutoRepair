@@ -86,6 +86,36 @@ export interface EventEntry {
   at: string;
 }
 
+export interface RepairTestCase {
+  stdin: string;
+  expected_stdout: string;
+  name?: string;
+}
+
+export interface TestCaseResult {
+  index: number;
+  name: string;
+  stdin: string;
+  expected_stdout: string;
+  expected_provided: boolean;
+  stdout: string;
+  stderr: string;
+  returncode: number;
+  timed_out: boolean;
+  duration_sec: number;
+  runtime_ok: boolean;
+  matched_output: boolean | null;
+  passed: boolean;
+}
+
+export interface TestCasesSummary {
+  provided: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  all_passed: boolean;
+}
+
 export interface RunResult {
   input_text?: string;
   stdout: string;
@@ -98,6 +128,9 @@ export interface RunResult {
     duration_sec: number;
     timed_out: boolean;
   };
+  user_prompt?: string;
+  test_cases_summary?: TestCasesSummary;
+  test_case_results?: TestCaseResult[];
 }
 
 export interface ProjectEntrypointOption {
@@ -147,6 +180,8 @@ export interface AgentHistorySnapshot {
   github_repo_url?: string;
   github_ref?: string;
   project_subdir?: string;
+  user_prompt?: string;
+  test_cases?: RepairTestCase[];
   run_result: RunResult | null;
   stages: Record<StageName, StageState>;
   events: EventEntry[];

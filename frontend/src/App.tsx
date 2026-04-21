@@ -716,6 +716,8 @@ function App() {
                   githubRef={repair.githubRef}
                   githubRepoUrl={repair.githubRepoUrl}
                   inputText={repair.inputText}
+                  userPrompt={repair.userPrompt}
+                  testCases={repair.testCases}
                   language={repair.language}
                   locale={locale}
                   model={agentModel}
@@ -738,6 +740,8 @@ function App() {
                   onGithubRefChange={repair.setGithubRef}
                   onGithubRepoUrlChange={repair.setGithubRepoUrl}
                   onInputTextChange={repair.setInputText}
+                  onUserPromptChange={repair.setUserPrompt}
+                  onTestCasesChange={repair.setTestCases}
                   onLanguageChange={repair.setLanguage}
                   onModelChange={setAgentModel}
                   onProjectSubdirChange={repair.setProjectSubdir}

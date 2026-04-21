@@ -30,6 +30,8 @@ from backend.repair.sandbox import run_project_safely
 MAX_CODE_CHARS = 100_000
 MAX_INPUT_CHARS = 20_000
 MAX_TIMEOUT_SEC = 30
+MAX_TEST_CASES = 10
+MAX_USER_PROMPT_CHARS = 8_000
 PATCH_GENERATION_MAX_ATTEMPTS = 3
 RETRYABLE_PATCH_GENERATION_ERROR_MARKERS: tuple[str, ...] = (
     "Unified diff is missing a `+++` header.",
@@ -57,6 +59,8 @@ Requirements:
 - Do not return Markdown fences, headings, bullets, commentary, or prose before/after the JSON.
 - If you are uncertain, keep the uncertainty inside JSON fields instead of switching to prose.
 - If the issue is caused by path/package/classpath mismatch, explicitly name the expected path and the actual path.
+- If the report contains a `test_cases` block, treat any case whose `passed` is false as a concrete failing specification, even if `execution.ok` is true. Describe the observable mismatch between `actual_stdout` and `expected_stdout` in `supporting_evidence`.
+- If the report contains a `user_prompt` field, treat it as the user's natural-language task description (e.g. a problem statement or intent) and use it to disambiguate the expected behaviour when evidence is ambiguous.
 
 Return JSON with this shape:
 {{
@@ -119,6 +123,8 @@ Rules:
 - Do not add explanations, comments, JSON, or prose before or after the diff.
 - If you drafted code mentally, convert it into a unified diff before responding.
 - Use the available function tools to inspect exact source windows before you finalize the diff.
+- If a `test_cases` block is present in the runtime report, the patched program MUST, when given each `stdin`, print the corresponding `expected_stdout` on a clean run. Derive the fix from those cases rather than hard-coding their outputs.
+- If a `user_prompt` field is present, treat it as the user's natural-language intent (e.g. a LeetCode problem statement) and keep the fix consistent with it.
 """
 
 CODE_EXPLAIN_SYSTEM_PROMPT = """你是一个优秀的代码修复工程师。
@@ -314,6 +320,21 @@ PATCH_GENERATION_PROFILE = PatchCandidateProfile(
 
 
 @dataclass(frozen=True)
+class RepairTestCase:
+    """A single user-provided I/O test case.
+
+    The case is "passed" when the patched program exits cleanly AND its
+    ``stdout`` matches ``expected_stdout`` after trailing-whitespace
+    normalisation. ``name`` is optional; when absent we synthesise
+    ``Case #N`` in the UI / prompts.
+    """
+
+    stdin: str
+    expected_stdout: str
+    name: str = ""
+
+
+@dataclass(frozen=True)
 class RepairRequest:
     code: str | None = None
     filename: str | None = "main.py"
@@ -326,6 +347,8 @@ class RepairRequest:
     github_repo_url: str | None = None
     github_ref: str | None = None
     project_subdir: str | None = None
+    user_prompt: str | None = None
+    test_cases: tuple[RepairTestCase, ...] = ()
 
     @property
     def source_type(self) -> str:
@@ -429,6 +452,67 @@ class RepairRequest:
                 raise ValueError("`project_subdir` must be a non-empty string when provided.")
             project_subdir = normalize_project_path(project_subdir)
 
+        raw_user_prompt = payload.get("user_prompt")
+        normalized_user_prompt: str | None = None
+        if raw_user_prompt is not None:
+            if not isinstance(raw_user_prompt, str):
+                raise ValueError("`user_prompt` must be a string when provided.")
+            trimmed_prompt = raw_user_prompt.strip()
+            if trimmed_prompt:
+                if len(trimmed_prompt) > MAX_USER_PROMPT_CHARS:
+                    raise ValueError(
+                        f"`user_prompt` must be at most {MAX_USER_PROMPT_CHARS} characters."
+                    )
+                normalized_user_prompt = trimmed_prompt
+
+        raw_test_cases = payload.get("test_cases")
+        test_cases: list[RepairTestCase] = []
+        if raw_test_cases is not None:
+            if not isinstance(raw_test_cases, list):
+                raise ValueError("`test_cases` must be an array when provided.")
+            if len(raw_test_cases) > MAX_TEST_CASES:
+                raise ValueError(f"`test_cases` can have at most {MAX_TEST_CASES} entries.")
+            for case_index, case_payload in enumerate(raw_test_cases):
+                if not isinstance(case_payload, dict):
+                    raise ValueError(f"`test_cases[{case_index}]` must be an object.")
+                raw_stdin = case_payload.get("stdin")
+                raw_expected = case_payload.get("expected_stdout")
+                raw_name = case_payload.get("name")
+                if raw_stdin is None:
+                    raw_stdin = ""
+                if raw_expected is None:
+                    raw_expected = ""
+                if not isinstance(raw_stdin, str):
+                    raise ValueError(f"`test_cases[{case_index}].stdin` must be a string.")
+                if not isinstance(raw_expected, str):
+                    raise ValueError(
+                        f"`test_cases[{case_index}].expected_stdout` must be a string."
+                    )
+                if len(raw_stdin) > MAX_INPUT_CHARS:
+                    raise ValueError(
+                        f"`test_cases[{case_index}].stdin` must be at most "
+                        f"{MAX_INPUT_CHARS} characters."
+                    )
+                if len(raw_expected) > MAX_INPUT_CHARS:
+                    raise ValueError(
+                        f"`test_cases[{case_index}].expected_stdout` must be at most "
+                        f"{MAX_INPUT_CHARS} characters."
+                    )
+                if raw_name is not None and not isinstance(raw_name, str):
+                    raise ValueError(f"`test_cases[{case_index}].name` must be a string.")
+                name_value = (raw_name or "").strip()[:80]
+                # Skip empty rows where the user typed nothing at all – keeps the
+                # accidental "click-and-forget" row from triggering the repair loop.
+                if not raw_stdin and not raw_expected and not name_value:
+                    continue
+                test_cases.append(
+                    RepairTestCase(
+                        stdin=raw_stdin,
+                        expected_stdout=raw_expected,
+                        name=name_value,
+                    )
+                )
+
         source_count = sum(
             1
             for present in (
@@ -456,6 +540,8 @@ class RepairRequest:
             github_repo_url=github_repo_url.strip() if isinstance(github_repo_url, str) else None,
             github_ref=github_ref.strip() if isinstance(github_ref, str) and github_ref.strip() else None,
             project_subdir=project_subdir,
+            user_prompt=normalized_user_prompt,
+            test_cases=tuple(test_cases),
         )
 
 
@@ -1056,6 +1142,151 @@ def _build_verification_base_source(patched_code: str, filename: str) -> tuple[s
     if not base_source:
         raise RuntimeError("Patched code did not contain reusable definitions for verification.")
     return f"{base_source}\n", skipped_descriptions
+
+
+def _normalize_output_for_match(text: str) -> str:
+    """Normalise a stdout blob before comparing it against the expected output.
+
+    We do not require byte-for-byte equality because that is too strict for
+    LeetCode-style problems: the expected output is usually handwritten and
+    the buggy program is often dumping the answer via ``print``. The rules:
+
+    * strip trailing whitespace on every line (catches stray spaces)
+    * collapse every consecutive run of ``\\n`` into exactly one ``\\n``
+      (catches stray blank lines the buggy program sometimes prints)
+    * strip leading/trailing whitespace from the whole blob
+    """
+
+    if not text:
+        return ""
+    lines = [line.rstrip() for line in text.replace("\r\n", "\n").split("\n")]
+    collapsed: list[str] = []
+    blank_pending = False
+    for line in lines:
+        if line == "":
+            blank_pending = True
+            continue
+        if blank_pending and collapsed:
+            collapsed.append("")
+        collapsed.append(line)
+        blank_pending = False
+    return "\n".join(collapsed).strip()
+
+
+def _case_display_name(index: int, case: "RepairTestCase") -> str:
+    if case.name:
+        return case.name
+    return f"Case #{index + 1}"
+
+
+def _run_one_test_case(
+    *,
+    workspace: Any,
+    file_map: dict[str, str] | None,
+    case: "RepairTestCase",
+    language: str,
+    timeout_sec: int,
+    workspace_root: Path | None = None,
+    index: int,
+) -> dict[str, Any]:
+    """Run a single user-provided test case against either the current
+    workspace-on-disk or a materialised patched workspace.
+
+    ``file_map`` is provided in the patched-rerun path so we can materialise
+    the patched files into a fresh tempdir; otherwise we run against the
+    workspace root already on disk.
+    """
+
+    display_name = _case_display_name(index, case)
+    if file_map is not None:
+        with materialize_patched_workspace(
+            workspace.root_dir,
+            file_map,
+            set(workspace.file_map.keys()),
+        ) as rerun_root:
+            execution = run_project_safely(
+                rerun_root,
+                filename=workspace.entrypoint,
+                language=language,
+                input_text=case.stdin,
+                timeout_sec=timeout_sec,
+            )
+    else:
+        target_root = workspace_root or workspace.root_dir
+        execution = run_project_safely(
+            target_root,
+            filename=workspace.entrypoint,
+            language=language,
+            input_text=case.stdin,
+            timeout_sec=timeout_sec,
+        )
+
+    actual = execution.stdout
+    expected = case.expected_stdout
+    expected_provided = bool(expected.strip())
+    matched_output = _normalize_output_for_match(actual) == _normalize_output_for_match(expected)
+    passed = execution.ok and (matched_output if expected_provided else True)
+
+    return {
+        "index": index,
+        "name": display_name,
+        "stdin": case.stdin,
+        "expected_stdout": expected,
+        "expected_provided": expected_provided,
+        "stdout": actual,
+        "stderr": execution.stderr,
+        "returncode": execution.returncode,
+        "timed_out": execution.timed_out,
+        "duration_sec": execution.duration_sec,
+        "runtime_ok": execution.ok,
+        "matched_output": matched_output if expected_provided else None,
+        "passed": passed,
+    }
+
+
+def _run_all_test_cases(
+    *,
+    workspace: Any,
+    cases: tuple["RepairTestCase", ...],
+    language: str,
+    timeout_sec: int,
+    file_map: dict[str, str] | None = None,
+    workspace_root: Path | None = None,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for index, case in enumerate(cases):
+        results.append(
+            _run_one_test_case(
+                workspace=workspace,
+                file_map=file_map,
+                case=case,
+                language=language,
+                timeout_sec=timeout_sec,
+                workspace_root=workspace_root,
+                index=index,
+            )
+        )
+    return results
+
+
+def _summarise_test_case_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    if not results:
+        return {
+            "provided": False,
+            "total": 0,
+            "passed": 0,
+            "failed": 0,
+            "all_passed": True,
+        }
+    passed = sum(1 for r in results if r.get("passed"))
+    failed = len(results) - passed
+    return {
+        "provided": True,
+        "total": len(results),
+        "passed": passed,
+        "failed": failed,
+        "all_passed": failed == 0,
+    }
 
 
 def _build_runtime_only_verification_report(
@@ -1690,6 +1921,20 @@ def run_repair_pipeline(
             input_text=request.input_text,
             timeout_sec=request.timeout_sec,
         )
+
+        # Optional: user-provided I/O test cases. When present they *replace*
+        # the "no error = done" early-return: even a runtime-clean program
+        # must also satisfy every case before we skip the repair pipeline.
+        initial_case_results: list[dict[str, Any]] = []
+        if request.test_cases:
+            initial_case_results = _run_all_test_cases(
+                workspace=workspace,
+                cases=request.test_cases,
+                language=request.language,
+                timeout_sec=request.timeout_sec,
+            )
+        case_summary = _summarise_test_case_results(initial_case_results)
+
         emit(
             "run_result",
             {
@@ -1701,17 +1946,43 @@ def run_repair_pipeline(
                 "entrypoint_code": workspace.entrypoint_code,
                 "source_type": workspace.source_type,
                 "file_count": len(workspace.file_map),
+                "user_prompt": request.user_prompt or "",
+                "test_cases_summary": case_summary,
+                "test_case_results": initial_case_results,
             },
         )
 
-        if execution.ok:
+        # Decide whether to short-circuit as "clean" (no repair needed).
+        #
+        #   * No test cases provided  -> legacy behaviour: clean iff default
+        #     execution succeeded.
+        #   * Test cases provided     -> test cases are authoritative. The
+        #     default execution is often NOT usable as a signal here, because
+        #     the program may need stdin that only appears inside the cases
+        #     themselves (e.g. LeetCode-style "read from stdin, print answer").
+        #     So we declare clean iff every provided case passed.
+        clean = (
+            case_summary["all_passed"]
+            if request.test_cases
+            else execution.ok
+        )
+        if clean:
             _emit_stage(emit, "run", "completed", message="No runtime error detected.")
             emit(
                 "result",
                 {
                     "status": "clean",
-                    "message": "No error detected.",
+                    "message": (
+                        "No error detected."
+                        if not request.test_cases
+                        else (
+                            "No runtime error and all "
+                            f"{case_summary['total']} test case(s) passed."
+                        )
+                    ),
                     "filename": workspace.entrypoint,
+                    "test_cases_summary": case_summary,
+                    "test_case_results": initial_case_results,
                 },
             )
             return
@@ -1721,6 +1992,33 @@ def run_repair_pipeline(
             request.input_text,
             execution,
         )
+        # Surface user-provided context to the Inspector / Planner / Coder.
+        # The test-case block is the *reason* we are repairing when the program
+        # did not raise on the default stdin; the user-prompt is the free-form
+        # hint (e.g. LeetCode problem statement).
+        if request.user_prompt:
+            runtime_report["user_prompt"] = request.user_prompt
+        if request.test_cases:
+            failing_cases = [r for r in initial_case_results if not r.get("passed")]
+            runtime_report["test_cases"] = {
+                "summary": case_summary,
+                "cases": [
+                    {
+                        "index": r["index"],
+                        "name": r["name"],
+                        "stdin": r["stdin"],
+                        "expected_stdout": r["expected_stdout"],
+                        "actual_stdout": r["stdout"],
+                        "actual_stderr_tail": (r.get("stderr") or "")[-1000:],
+                        "passed": r["passed"],
+                        "matched_output": r.get("matched_output"),
+                        "runtime_ok": r.get("runtime_ok"),
+                        "timed_out": r.get("timed_out"),
+                    }
+                    for r in initial_case_results
+                ],
+                "failing_cases": [r["name"] for r in failing_cases],
+            }
         stage_tools = build_repair_tools(
             RepairToolContext(
                 language=request.language,
@@ -1748,6 +2046,15 @@ def run_repair_pipeline(
             if not getattr(exc, "json_parse_failed", False):
                 raise
             inspector_report = _build_fallback_inspector_report(runtime_report, exc)
+        # Propagate user-supplied hints into the Planner's context as well.
+        # The Planner prompt serialises `inspector_report` in full, so attaching
+        # these fields here makes them visible to the Planner without having to
+        # modify the Planner prompt template.
+        if isinstance(inspector_report, dict):
+            if request.user_prompt and "user_prompt" not in inspector_report:
+                inspector_report["user_prompt"] = request.user_prompt
+            if request.test_cases and "test_cases" in runtime_report:
+                inspector_report["test_cases"] = runtime_report["test_cases"]
         emit("inspect_report", {"stage": "inspect", "report": inspector_report})
         # Kick off the inspect first-person summary in the background so the plan stage's
         # primary LLM call can start immediately. The worker will emit `stage/completed`
@@ -2041,9 +2348,27 @@ def run_repair_pipeline(
                             timeout_sec=request.timeout_sec,
                         )
 
+                    # If the user supplied test cases, re-run them against the
+                    # patched workspace and require every one to pass before we
+                    # declare the candidate "verified". This is the scenario
+                    # behind a LeetCode-style submission: assertions alone are
+                    # not enough — the actual program must print the expected
+                    # output for every hidden case too.
+                    patched_case_results: list[dict[str, Any]] = []
+                    if request.test_cases:
+                        patched_case_results = _run_all_test_cases(
+                            workspace=workspace,
+                            cases=request.test_cases,
+                            language=request.language,
+                            timeout_sec=request.timeout_sec,
+                            file_map=candidate.patched_files,
+                        )
+                    patched_case_summary = _summarise_test_case_results(patched_case_results)
+
                     candidate.verify_passed = bool(
                         candidate.patched_execution.ok
                         and candidate.verification_execution.ok
+                        and (not request.test_cases or patched_case_summary["all_passed"])
                     )
                     failed_line_index = _detect_failed_verification_line(
                         candidate.verification_execution,
@@ -2064,19 +2389,43 @@ def run_repair_pipeline(
                         "failed_assertion_index": (
                             failed_line_index if failed_line_index is not None else None
                         ),
+                        "test_cases_summary": patched_case_summary,
+                        "test_case_results": patched_case_results,
                     }
                     candidate.verification_stdout = candidate.verification_execution.stdout
                     candidate.verification_stderr = candidate.verification_execution.stderr
                     candidate.verification_base_mode = "definition_only_entrypoint_context"
                     candidate.skipped_top_level_nodes = skipped_verification_nodes
                 else:
-                    candidate.verification_execution = candidate.patched_execution
-                    candidate.verify_passed = bool(candidate.patched_execution.ok)
-                    candidate.verification_report = _build_runtime_only_verification_report(
-                        language=request.language,
-                        patched_execution=candidate.patched_execution,
-                        modified_files=candidate.modified_files,
+                    patched_case_results_non_py: list[dict[str, Any]] = []
+                    if request.test_cases:
+                        patched_case_results_non_py = _run_all_test_cases(
+                            workspace=workspace,
+                            cases=request.test_cases,
+                            language=request.language,
+                            timeout_sec=request.timeout_sec,
+                            file_map=candidate.patched_files,
+                        )
+                    patched_case_summary_non_py = _summarise_test_case_results(
+                        patched_case_results_non_py
                     )
+                    candidate.verification_execution = candidate.patched_execution
+                    candidate.verify_passed = bool(
+                        candidate.patched_execution.ok
+                        and (
+                            not request.test_cases
+                            or patched_case_summary_non_py["all_passed"]
+                        )
+                    )
+                    candidate.verification_report = {
+                        **_build_runtime_only_verification_report(
+                            language=request.language,
+                            patched_execution=candidate.patched_execution,
+                            modified_files=candidate.modified_files,
+                        ),
+                        "test_cases_summary": patched_case_summary_non_py,
+                        "test_case_results": patched_case_results_non_py,
+                    }
                     candidate.verification_stdout = candidate.patched_execution.stdout
                     candidate.verification_stderr = candidate.patched_execution.stderr
                     candidate.verification_base_mode = "runtime_rerun_only"

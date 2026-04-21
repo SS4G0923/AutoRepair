@@ -8,10 +8,13 @@ import type {
   HistorySummary,
   ModelOptionValue,
   ProjectEntrypointOption,
+  RepairTestCase,
   RunResult,
   SessionStatus,
   StageName,
   StageState,
+  TestCaseResult,
+  TestCasesSummary,
   ToolEventEntry,
 } from "../types";
 import {
@@ -123,6 +126,8 @@ export function useRepairSession({
   const [language, setLanguage] = useState<CodeLanguage>("python");
   const [code, setCode] = useState(codeTemplates.python);
   const [inputText, setInputText] = useState("");
+  const [userPrompt, setUserPrompt] = useState("");
+  const [testCases, setTestCases] = useState<RepairTestCase[]>([]);
   const [entrypointPath, setEntrypointPath] = useState(defaultEntrypointForLanguage("python"));
   const [projectSubdir, setProjectSubdir] = useState("");
   const [githubRepoUrl, setGithubRepoUrl] = useState("");
@@ -380,9 +385,31 @@ export function useRepairSession({
     }
   }
 
+  function buildOptionalContextPayload() {
+    const extras: Record<string, unknown> = {};
+    const trimmedPrompt = userPrompt.trim();
+    if (trimmedPrompt) {
+      extras.user_prompt = trimmedPrompt;
+    }
+    const serialisableCases = testCases
+      .map((c) => ({
+        stdin: c.stdin,
+        expected_stdout: c.expected_stdout,
+        name: (c.name ?? "").trim(),
+      }))
+      .filter(
+        (c) => c.stdin.length > 0 || c.expected_stdout.length > 0 || c.name.length > 0,
+      );
+    if (serialisableCases.length > 0) {
+      extras.test_cases = serialisableCases;
+    }
+    return extras;
+  }
+
   function buildRepairPayload() {
     const { normalizedEntrypoint, normalizedSubdir, selectedProjectEntrypoint, selectedProjectLanguage } =
       resolveProjectSelection();
+    const optionalContext = buildOptionalContextPayload();
 
     if (agentSourceType === "single_file") {
       return {
@@ -391,6 +418,7 @@ export function useRepairSession({
         filename: normalizedEntrypoint || defaultEntrypointForLanguage(language),
         language,
         ...(model ? { model } : {}),
+        ...optionalContext,
       };
     }
 
@@ -408,6 +436,7 @@ export function useRepairSession({
         ...(model ? { model } : {}),
         project_zip_base64: zipFileBase64,
         ...(normalizedSubdir ? { project_subdir: normalizedSubdir } : {}),
+        ...optionalContext,
       };
     }
 
@@ -426,6 +455,7 @@ export function useRepairSession({
       ...(model ? { model } : {}),
       github_repo_url: normalizedRepoUrl,
       ...(normalizedRef ? { github_ref: normalizedRef } : {}),
+      ...optionalContext,
     };
   }
 
@@ -477,6 +507,14 @@ export function useRepairSession({
                 timed_out: Boolean((data.execution as Record<string, unknown>).timed_out ?? false),
               }
             : undefined,
+        user_prompt: typeof data.user_prompt === "string" ? data.user_prompt : undefined,
+        test_cases_summary:
+          typeof data.test_cases_summary === "object" && data.test_cases_summary
+            ? (data.test_cases_summary as TestCasesSummary)
+            : undefined,
+        test_case_results: Array.isArray(data.test_case_results)
+          ? (data.test_case_results as TestCaseResult[])
+          : undefined,
       });
       return;
     }
@@ -913,6 +951,8 @@ export function useRepairSession({
 
   function startNewAgentSession() {
     setInputText("");
+    setUserPrompt("");
+    setTestCases([]);
     if (agentSourceType === "single_file") {
       setCode(codeTemplates[language]);
       setEntrypointPath(defaultEntrypointForLanguage(language));
@@ -944,6 +984,16 @@ export function useRepairSession({
     setZipFileName("");
     setZipFileBase64("");
     setInputText(snapshot.input_text ?? snapshot.run_result?.input_text ?? "");
+    setUserPrompt(snapshot.user_prompt ?? snapshot.run_result?.user_prompt ?? "");
+    setTestCases(
+      Array.isArray(snapshot.test_cases)
+        ? snapshot.test_cases.map((c) => ({
+            stdin: c.stdin ?? "",
+            expected_stdout: c.expected_stdout ?? "",
+            name: c.name ?? "",
+          }))
+        : [],
+    );
     setProjectEntrypointOptions(
       snapshot.source_type && snapshot.source_type !== "single_file" && snapshot.filename
         ? [{ path: snapshot.filename, language: snapshot.language ?? "python" }]
@@ -986,6 +1036,8 @@ export function useRepairSession({
     language,
     code,
     inputText,
+    userPrompt,
+    testCases,
     entrypointPath,
     projectSubdir,
     githubRepoUrl,
@@ -1009,6 +1061,8 @@ export function useRepairSession({
     setLanguage,
     setCode,
     setInputText,
+    setUserPrompt,
+    setTestCases,
     setEntrypointPath: handleProjectEntrypointChange,
     setProjectSubdir: handleProjectSubdirChange,
     setGithubRepoUrl: handleGithubRepoUrlChange,
