@@ -81,7 +81,7 @@ interface AdminSurfaceProps extends PropsWithChildren {
 export function AdminSurface({ children, className = "" }: AdminSurfaceProps) {
   return (
     <section
-      className={`rounded-[20px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04] ${className}`.trim()}
+      className={`w-full min-w-0 rounded-[20px] border border-black/5 bg-white/50 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04] ${className}`.trim()}
     >
       {children}
     </section>
@@ -128,7 +128,7 @@ export function AdminMetricCard({
   tone = "slate",
 }: AdminMetricCardProps) {
   return (
-    <div className={`rounded-2xl border px-3 py-2.5 ${toneClasses(tone)}`}>
+    <div className={`min-w-0 rounded-2xl border px-3 py-2.5 ${toneClasses(tone)}`}>
       <div className="text-[10px] uppercase tracking-[0.22em] opacity-70">{label}</div>
       <div className="mt-1 text-xl font-semibold tracking-tight">{value}</div>
       {caption ? <div className="mt-1 truncate text-xs opacity-70">{caption}</div> : null}

@@ -259,3 +259,26 @@ export function TrashIcon() {
     </svg>
   );
 }
+
+export function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
+      <path
+        d="M4.5 10a7.5 7.5 0 0 1 13.4-4.1M19.5 14a7.5 7.5 0 0 1-13.4 4.1"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M17.5 3v3.1h-3.1M6.5 21v-3.1h3.1"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}

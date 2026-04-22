@@ -40,7 +40,7 @@ export function AdminPaymentsPage({
   const canGoNext = Boolean(orders && orders.page * orders.page_size < orders.total);
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <AdminMetricCard
           label={copy.adminPayments}

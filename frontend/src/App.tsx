@@ -66,6 +66,7 @@ function App() {
   const oauthReturnRef = useRef(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const historyRequestRef = useRef(0);
+  const lastNonAdminWorkspaceRef = useRef<WorkspaceMode>("agent");
 
   const {
     sidebarWidthPx,
@@ -270,6 +271,12 @@ function App() {
   }, [currentUser?.role]);
 
   useEffect(() => {
+    if (workspaceMode !== "admin") {
+      lastNonAdminWorkspaceRef.current = workspaceMode;
+    }
+  }, [workspaceMode]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     oauthReturnRef.current = params.get("auth_success") === "1";
     if (params.get("auth_error") === "provider_unavailable") {
@@ -368,6 +375,10 @@ function App() {
     admin.setAdminPage("dashboard");
     setWorkspaceMode("admin");
     admin.refreshAdminData();
+  }
+
+  function closeAdminConsole() {
+    setWorkspaceMode(lastNonAdminWorkspaceRef.current === "admin" ? "agent" : lastNonAdminWorkspaceRef.current);
   }
 
   function openBillingCenter() {
@@ -493,32 +504,54 @@ function App() {
           ? dict.statusError
           : dict.statusIdle;
 
+  const isAdminWorkspace = !sessionLoading && Boolean(currentUser) && workspaceMode === "admin";
+
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,133,82,0.2),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(39,111,191,0.22),_transparent_30%),linear-gradient(180deg,#f7f3ea_0%,#efe7d8_100%)] text-slate-900 transition-colors dark:bg-[radial-gradient(circle_at_top_left,_rgba(255,133,82,0.12),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(39,111,191,0.18),_transparent_30%),linear-gradient(180deg,#171411_0%,#0f1118_100%)] dark:text-white">
+    <div
+      className={
+        isAdminWorkspace
+          ? "min-h-screen bg-[#f3f5f9] text-slate-900 transition-colors dark:bg-[#0b1020] dark:text-white"
+          : "min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,133,82,0.2),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(39,111,191,0.22),_transparent_30%),linear-gradient(180deg,#f7f3ea_0%,#efe7d8_100%)] text-slate-900 transition-colors dark:bg-[radial-gradient(circle_at_top_left,_rgba(255,133,82,0.12),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(39,111,191,0.18),_transparent_30%),linear-gradient(180deg,#171411_0%,#0f1118_100%)] dark:text-white"
+      }
+    >
       <div
-        className={`mx-auto max-w-[1500px] px-3 pt-3 sm:px-4 lg:px-6 ${
-          !sessionLoading && !currentUser
-            ? "h-screen overflow-hidden pb-3"
-            : !sessionLoading && currentUser
-              ? "flex h-[100dvh] max-h-[100dvh] min-h-0 flex-col overflow-hidden pb-1.5"
-              : "pb-4"
-        }`}
+        className={
+          isAdminWorkspace
+            ? "flex h-[100dvh] max-h-[100dvh] min-h-0 flex-col overflow-hidden"
+            : `mx-auto max-w-[1500px] px-3 pt-3 sm:px-4 lg:px-6 ${
+                !sessionLoading && !currentUser
+                  ? "h-screen overflow-hidden pb-3"
+                  : !sessionLoading && currentUser
+                    ? "flex h-[100dvh] max-h-[100dvh] min-h-0 flex-col overflow-hidden pb-1.5"
+                    : "pb-4"
+              }`
+        }
       >
-        <AppHeader
-          canAccessAdmin={Boolean(canAccessAdmin)}
-          currentUser={currentUser}
-          copy={dict}
-          showUpgrade={Boolean(showUpgrade)}
-          theme={theme}
-          userMenuOpen={userMenuOpen}
-          userMenuRef={userMenuRef}
-          onLogout={handleLogout}
-          onOpenAdmin={openAdminConsole}
-          onOpenBilling={openBillingCenter}
-          onToggleLocale={() => setLocale((current) => (current === "zh" ? "en" : "zh"))}
-          onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-          onToggleUserMenu={() => setUserMenuOpen((current) => !current)}
-        />
+        {!isAdminWorkspace ? (
+          <AppHeader
+            canAccessAdmin={Boolean(canAccessAdmin)}
+            currentUser={currentUser}
+            copy={dict}
+            showUpgrade={Boolean(showUpgrade)}
+            theme={theme}
+            userMenuOpen={userMenuOpen}
+            userMenuRef={userMenuRef}
+            onLogout={handleLogout}
+            onOpenAdmin={openAdminConsole}
+            onOpenBilling={openBillingCenter}
+            onOpenProfile={() => {
+              setUserMenuOpen(false);
+              startNewProfileSession();
+            }}
+            onOpenTeams={() => {
+              setUserMenuOpen(false);
+              startNewTeamsSession();
+            }}
+            onToggleLocale={() => setLocale((current) => (current === "zh" ? "en" : "zh"))}
+            onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            onToggleUserMenu={() => setUserMenuOpen((current) => !current)}
+          />
+        ) : null}
 
         {sessionLoading ? (
           <div className="grid min-h-[82vh] place-items-center">
@@ -551,67 +584,8 @@ function App() {
 
         {!sessionLoading && currentUser ? (
           <>
-            <main
-              className={
-                isDesktopLayout
-                  ? "mt-2 grid min-h-0 flex-1 items-stretch gap-0 overflow-hidden"
-                  : "mt-2 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden"
-              }
-              style={
-                isDesktopLayout
-                  ? { gridTemplateColumns: `${sidebarWidthPx}px 6px minmax(0,1fr)` }
-                  : undefined
-              }
-            >
-              <AppSidebar
-                adminPage={admin.adminPage}
-                canAccessAdmin={Boolean(canAccessAdmin)}
-                copy={dict}
-                deletingHistoryId={deletingHistoryId}
-                historyItems={historyItems}
-                historyLoading={historyLoading}
-                isDesktopLayout={isDesktopLayout}
-                locale={locale}
-                selectedHistoryId={selectedHistoryId}
-                workspaceMode={workspaceMode}
-                onDeleteHistory={(historyId) => {
-                  void handleDeleteHistory(historyId);
-                }}
-                onOpenHistory={(historyId) => {
-                  void handleHistoryOpen(historyId);
-                }}
-                onSelectAdminPage={selectAdminPage}
-                onStartNewAgentSession={startNewAgentSession}
-                onStartNewAdminSession={openAdminConsole}
-                onStartNewChatSession={startNewChatSession}
-                onStartNewBenchmarkSession={startNewBenchmarkSession}
-                onStartNewProfileSession={startNewProfileSession}
-                onStartNewTeamsSession={startNewTeamsSession}
-              />
-
-              {isDesktopLayout ? (
-                <div
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-valuemin={MIN_SIDEBAR_WIDTH}
-                  aria-valuemax={MAX_SIDEBAR_WIDTH}
-                  aria-valuenow={Math.round(sidebarWidthPx)}
-                  aria-label={
-                    locale === "zh"
-                      ? "拖动调整侧栏宽度，双击恢复默认"
-                      : "Drag to resize sidebar; double-click to reset"
-                  }
-                  onPointerDown={handleSidebarResizePointerDown}
-                  onDoubleClick={handleSidebarResizeReset}
-                  className={`relative z-20 w-[6px] shrink-0 cursor-col-resize touch-none select-none ${
-                    sidebarResizing ? "bg-black/[0.06] dark:bg-white/[0.08]" : ""
-                  }`}
-                >
-                  <div className="pointer-events-none absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-full bg-black/15 dark:bg-white/20" />
-                </div>
-              ) : null}
-
-              {workspaceMode === "admin" ? (
+            {workspaceMode === "admin" ? (
+              <main className="flex min-h-0 w-full min-w-0 flex-1 overflow-hidden">
                 <AdminWorkspace
                   activityPage={admin.activityPage}
                   adminError={admin.adminError}
@@ -622,6 +596,7 @@ function App() {
                   adminUserRoleUpdatingId={admin.adminUserRoleUpdatingId}
                   apiBaseUrl={apiBaseUrl}
                   copy={dict}
+                  currentUser={currentUser}
                   dashboardData={admin.dashboardData}
                   loginEvents={admin.loginEvents}
                   modelConfigs={admin.modelConfigs}
@@ -635,7 +610,6 @@ function App() {
                   requests={admin.requests}
                   selectedRequestId={admin.selectedRequestId}
                   users={admin.users}
-                  workspaceMainClass={workspaceMainClass}
                   onActivityPageChange={admin.setActivityPage}
                   onCreateModelConfig={admin.createAdminModelConfig}
                   onDeleteModelConfig={admin.deleteAdminModelConfig}
@@ -646,6 +620,8 @@ function App() {
                   onPaymentFiltersChange={admin.setPaymentFilters}
                   onRefresh={admin.refreshAdminData}
                   onRequestFiltersChange={admin.setRequestFilters}
+                  onExitAdmin={closeAdminConsole}
+                  onSelectAdminPage={selectAdminPage}
                   onSelectRequest={admin.setSelectedRequestId}
                   onUpdateModelConfig={admin.updateAdminModelConfig}
                   onUpdateUserRole={(userId, role) => {
@@ -655,124 +631,181 @@ function App() {
                     void admin.rejectPaymentOrder(orderId);
                   }}
                 />
-              ) : workspaceMode === "billing" ? (
-                <BillingWorkspace
-                  activeOrderId={billing.activeOrderId}
-                  activeOrderSession={billing.activeOrderSession}
-                  billingActing={billing.billingActing}
-                  billingData={billing.billingData}
-                  billingError={billing.billingError}
-                  billingLoading={billing.billingLoading}
+              </main>
+            ) : (
+              <main
+                className={
+                  isDesktopLayout
+                    ? "mt-2 grid min-h-0 flex-1 items-stretch gap-0 overflow-hidden"
+                    : "mt-2 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden"
+                }
+                style={
+                  isDesktopLayout
+                    ? { gridTemplateColumns: `${sidebarWidthPx}px 6px minmax(0,1fr)` }
+                    : undefined
+                }
+              >
+                <AppSidebar
                   copy={dict}
-                  currentUser={currentUser}
-                  workspaceMainClass={workspaceMainClass}
-                  onCreateOrder={billing.createOrder}
-                  onRefresh={() => {
-                    void billing.refreshBillingData();
-                  }}
-                  onRefreshOrderSession={billing.refreshOrderSession}
-                  onSelectOrder={billing.setActiveOrderId}
-                />
-              ) : workspaceMode === "benchmark" ? (
-                <BenchmarkWorkspace
-                  apiBaseUrl={apiBaseUrl}
-                  copy={dict}
-                  page={benchmarkPage}
-                  modelOptions={availableModels}
-                  model={agentModel}
-                  onModelChange={setAgentModel}
-                  onPageChange={setBenchmarkPage}
-                  workspaceMainClass={workspaceMainClass}
-                />
-              ) : workspaceMode === "profile" ? (
-                <ProfileWorkspace
-                  apiBaseUrl={apiBaseUrl}
-                  copy={dict}
-                  currentUser={currentUser}
-                  modelOptions={availableModels}
-                  page={profilePage}
-                  onPageChange={setProfilePage}
-                  workspaceMainClass={workspaceMainClass}
-                />
-              ) : workspaceMode === "teams" ? (
-                <TeamsWorkspace
-                  apiBaseUrl={apiBaseUrl}
-                  copy={dict}
-                  page={teamsPage}
-                  onPageChange={setTeamsPage}
-                  workspaceMainClass={workspaceMainClass}
-                />
-              ) : workspaceMode === "agent" ? (
-                <AgentWorkspace
-                  agentSourceType={repair.agentSourceType}
-                  code={repair.code}
-                  copy={dict}
-                  diffApplied={repair.diffApplied}
-                  diffDecisionMessage={repair.diffDecisionMessage}
-                  entrypointPath={repair.entrypointPath}
-                  errorMessage={repair.errorMessage}
-                  finalDiff={repair.finalDiff}
-                  finalMessage={repair.finalMessage}
-                  githubRef={repair.githubRef}
-                  githubRepoUrl={repair.githubRepoUrl}
-                  inputText={repair.inputText}
-                  userPrompt={repair.userPrompt}
-                  testCases={repair.testCases}
-                  language={repair.language}
-                  locale={locale}
-                  model={agentModel}
-                  modelOptions={availableModels}
-                  projectActionLoading={repair.projectActionLoading}
-                  projectSubdir={repair.projectSubdir}
-                  projectEntrypointOptions={repair.projectEntrypointOptions}
-                  projectFilesLoading={repair.projectFilesLoading}
-                  languageSupported={repair.languageSupported}
-                  runResult={repair.runResult}
-                  stages={repair.stages}
-                  status={repair.status}
-                  statusText={statusText}
-                  verificationPassed={repair.verificationPassed}
-                  workspaceMainClass={workspaceMainClass}
-                  zipFileName={repair.zipFileName}
-                  onApplyDiff={repair.handleApplyDiff}
-                  onCodeChange={repair.setCode}
-                  onEntrypointChange={repair.setEntrypointPath}
-                  onGithubRefChange={repair.setGithubRef}
-                  onGithubRepoUrlChange={repair.setGithubRepoUrl}
-                  onInputTextChange={repair.setInputText}
-                  onUserPromptChange={repair.setUserPrompt}
-                  onTestCasesChange={repair.setTestCases}
-                  onLanguageChange={repair.setLanguage}
-                  onModelChange={setAgentModel}
-                  onProjectSubdirChange={repair.setProjectSubdir}
-                  onReset={handleReset}
-                  onSend={repair.handleSend}
-                  onSkipDiff={repair.skipApplyingDiff}
-                  onSourceTypeChange={repair.setAgentSourceType}
-                  onStop={repair.stopStreaming}
-                  onZipSelected={repair.handleZipSelected}
-                />
-              ) : (
-                <ChatWorkspace
-                  activeModelLabel={activeChatModel?.label ?? chatModel}
-                  chatError={chat.chatError}
-                  chatInput={chat.chatInput}
-                  chatMessages={chat.chatMessages}
-                  chatReasoningStreaming={chat.chatReasoningStreaming}
-                  chatStreamingText={chat.chatStreamingText}
-                  chatThinking={chat.chatThinking}
-                  copy={dict}
+                  deletingHistoryId={deletingHistoryId}
+                  historyItems={historyItems}
+                  historyLoading={historyLoading}
                   isDesktopLayout={isDesktopLayout}
-                  model={chatModel}
-                  modelOptions={availableModels}
-                  onChatInputChange={chat.setChatInput}
-                  onModelChange={setChatModel}
-                  onSend={chat.handleChatSend}
+                  locale={locale}
+                  selectedHistoryId={selectedHistoryId}
+                  workspaceMode={workspaceMode}
+                  onDeleteHistory={(historyId) => {
+                    void handleDeleteHistory(historyId);
+                  }}
+                  onOpenHistory={(historyId) => {
+                    void handleHistoryOpen(historyId);
+                  }}
+                  onStartNewAgentSession={startNewAgentSession}
+                  onStartNewChatSession={startNewChatSession}
+                  onStartNewBenchmarkSession={startNewBenchmarkSession}
                 />
-              )}
-            </main>
 
-            {dict.footer.trim() ? (
+                {isDesktopLayout ? (
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-valuemin={MIN_SIDEBAR_WIDTH}
+                    aria-valuemax={MAX_SIDEBAR_WIDTH}
+                    aria-valuenow={Math.round(sidebarWidthPx)}
+                    aria-label={
+                      locale === "zh"
+                        ? "拖动调整侧栏宽度，双击恢复默认"
+                        : "Drag to resize sidebar; double-click to reset"
+                    }
+                    onPointerDown={handleSidebarResizePointerDown}
+                    onDoubleClick={handleSidebarResizeReset}
+                    className={`relative z-20 w-[6px] shrink-0 cursor-col-resize touch-none select-none ${
+                      sidebarResizing ? "bg-black/[0.06] dark:bg-white/[0.08]" : ""
+                    }`}
+                  >
+                    <div className="pointer-events-none absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-full bg-black/15 dark:bg-white/20" />
+                  </div>
+                ) : null}
+
+                {workspaceMode === "billing" ? (
+                  <BillingWorkspace
+                    activeOrderId={billing.activeOrderId}
+                    activeOrderSession={billing.activeOrderSession}
+                    billingActing={billing.billingActing}
+                    billingData={billing.billingData}
+                    billingError={billing.billingError}
+                    billingLoading={billing.billingLoading}
+                    copy={dict}
+                    currentUser={currentUser}
+                    workspaceMainClass={workspaceMainClass}
+                    onCreateOrder={billing.createOrder}
+                    onRefresh={() => {
+                      void billing.refreshBillingData();
+                    }}
+                    onRefreshOrderSession={billing.refreshOrderSession}
+                    onSelectOrder={billing.setActiveOrderId}
+                  />
+                ) : workspaceMode === "benchmark" ? (
+                  <BenchmarkWorkspace
+                    apiBaseUrl={apiBaseUrl}
+                    copy={dict}
+                    page={benchmarkPage}
+                    modelOptions={availableModels}
+                    model={agentModel}
+                    onModelChange={setAgentModel}
+                    onPageChange={setBenchmarkPage}
+                    workspaceMainClass={workspaceMainClass}
+                  />
+                ) : workspaceMode === "profile" ? (
+                  <ProfileWorkspace
+                    apiBaseUrl={apiBaseUrl}
+                    copy={dict}
+                    currentUser={currentUser}
+                    modelOptions={availableModels}
+                    page={profilePage}
+                    onPageChange={setProfilePage}
+                    workspaceMainClass={workspaceMainClass}
+                  />
+                ) : workspaceMode === "teams" ? (
+                  <TeamsWorkspace
+                    apiBaseUrl={apiBaseUrl}
+                    copy={dict}
+                    page={teamsPage}
+                    onPageChange={setTeamsPage}
+                    workspaceMainClass={workspaceMainClass}
+                  />
+                ) : workspaceMode === "agent" ? (
+                  <AgentWorkspace
+                    agentSourceType={repair.agentSourceType}
+                    code={repair.code}
+                    copy={dict}
+                    diffApplied={repair.diffApplied}
+                    diffDecisionMessage={repair.diffDecisionMessage}
+                    entrypointPath={repair.entrypointPath}
+                    errorMessage={repair.errorMessage}
+                    finalDiff={repair.finalDiff}
+                    finalMessage={repair.finalMessage}
+                    githubRef={repair.githubRef}
+                    githubRepoUrl={repair.githubRepoUrl}
+                    inputText={repair.inputText}
+                    userPrompt={repair.userPrompt}
+                    testCases={repair.testCases}
+                    language={repair.language}
+                    locale={locale}
+                    model={agentModel}
+                    modelOptions={availableModels}
+                    projectActionLoading={repair.projectActionLoading}
+                    projectSubdir={repair.projectSubdir}
+                    projectEntrypointOptions={repair.projectEntrypointOptions}
+                    projectFilesLoading={repair.projectFilesLoading}
+                    languageSupported={repair.languageSupported}
+                    runResult={repair.runResult}
+                    stages={repair.stages}
+                    status={repair.status}
+                    statusText={statusText}
+                    verificationPassed={repair.verificationPassed}
+                    workspaceMainClass={workspaceMainClass}
+                    zipFileName={repair.zipFileName}
+                    onApplyDiff={repair.handleApplyDiff}
+                    onCodeChange={repair.setCode}
+                    onEntrypointChange={repair.setEntrypointPath}
+                    onGithubRefChange={repair.setGithubRef}
+                    onGithubRepoUrlChange={repair.setGithubRepoUrl}
+                    onInputTextChange={repair.setInputText}
+                    onUserPromptChange={repair.setUserPrompt}
+                    onTestCasesChange={repair.setTestCases}
+                    onLanguageChange={repair.setLanguage}
+                    onModelChange={setAgentModel}
+                    onProjectSubdirChange={repair.setProjectSubdir}
+                    onReset={handleReset}
+                    onSend={repair.handleSend}
+                    onSkipDiff={repair.skipApplyingDiff}
+                    onSourceTypeChange={repair.setAgentSourceType}
+                    onStop={repair.stopStreaming}
+                    onZipSelected={repair.handleZipSelected}
+                  />
+                ) : (
+                  <ChatWorkspace
+                    activeModelLabel={activeChatModel?.label ?? chatModel}
+                    chatError={chat.chatError}
+                    chatInput={chat.chatInput}
+                    chatMessages={chat.chatMessages}
+                    chatReasoningStreaming={chat.chatReasoningStreaming}
+                    chatStreamingText={chat.chatStreamingText}
+                    chatThinking={chat.chatThinking}
+                    copy={dict}
+                    isDesktopLayout={isDesktopLayout}
+                    model={chatModel}
+                    modelOptions={availableModels}
+                    onChatInputChange={chat.setChatInput}
+                    onModelChange={setChatModel}
+                    onSend={chat.handleChatSend}
+                  />
+                )}
+              </main>
+            )}
+
+            {!isAdminWorkspace && dict.footer.trim() ? (
               <footer className="mt-2 shrink-0 text-center text-[11px] uppercase tracking-[0.2em] text-slate-500 dark:text-white/35">
                 {dict.footer}
               </footer>

@@ -2,7 +2,15 @@ import type { RefObject } from "react";
 import type { AppCopy } from "../../i18n";
 import { getUserInitials, getUserRoleLabel } from "../../app/utils";
 import type { AuthenticatedUser, ThemeMode } from "../../types";
-import { AdminIcon, LanguageIcon, MoonIcon, PaymentIcon, SunIcon } from "./AppIcons";
+import {
+  AdminIcon,
+  LanguageIcon,
+  MoonIcon,
+  PaymentIcon,
+  ProfileIcon,
+  SunIcon,
+  TeamsIcon,
+} from "./AppIcons";
 
 interface AppHeaderProps {
   canAccessAdmin: boolean;
@@ -15,6 +23,8 @@ interface AppHeaderProps {
   onLogout: () => void;
   onOpenAdmin: () => void;
   onOpenBilling: () => void;
+  onOpenProfile: () => void;
+  onOpenTeams: () => void;
   onToggleLocale: () => void;
   onToggleTheme: () => void;
   onToggleUserMenu: () => void;
@@ -31,6 +41,8 @@ export function AppHeader({
   onLogout,
   onOpenAdmin,
   onOpenBilling,
+  onOpenProfile,
+  onOpenTeams,
   onToggleLocale,
   onToggleTheme,
   onToggleUserMenu,
@@ -98,7 +110,7 @@ export function AppHeader({
             </button>
 
             {userMenuOpen ? (
-              <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[60] min-w-[240px] rounded-[24px] border border-black/10 bg-white/92 p-2 backdrop-blur-xl dark:border-white/10 dark:bg-ink-900/95">
+              <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[60] min-w-[260px] rounded-[24px] border border-black/10 bg-white/92 p-2 backdrop-blur-xl dark:border-white/10 dark:bg-ink-900/95">
                 <div className="rounded-[18px] px-3 py-3 text-sm text-slate-600 dark:text-white/70">
                   <div className="font-medium text-slate-900 dark:text-white">
                     {currentUser.display_name}
@@ -111,12 +123,40 @@ export function AppHeader({
                   </div>
                 </div>
 
+                <div className="my-1 h-px bg-black/[0.06] dark:bg-white/[0.06]" />
+
+                <button
+                  onClick={onOpenProfile}
+                  className="flex w-full items-center justify-between rounded-[18px] px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-black/[0.04] dark:text-white/80 dark:hover:bg-white/[0.05]"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span className="grid h-8 w-8 place-items-center rounded-full bg-black/[0.04] dark:bg-white/[0.05]">
+                      <ProfileIcon />
+                    </span>
+                    <span>{copy.modeProfile}</span>
+                  </span>
+                  <span className="text-slate-400 dark:text-white/35">↗</span>
+                </button>
+
+                <button
+                  onClick={onOpenTeams}
+                  className="flex w-full items-center justify-between rounded-[18px] px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-black/[0.04] dark:text-white/80 dark:hover:bg-white/[0.05]"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span className="grid h-8 w-8 place-items-center rounded-full bg-black/[0.04] dark:bg-white/[0.05]">
+                      <TeamsIcon />
+                    </span>
+                    <span>{copy.modeTeams}</span>
+                  </span>
+                  <span className="text-slate-400 dark:text-white/35">↗</span>
+                </button>
+
                 {canAccessAdmin ? (
                   <button
                     onClick={onOpenAdmin}
-                    className="flex w-full items-center justify-between rounded-[18px] px-3 py-3 text-left text-sm font-medium text-slate-700 transition hover:bg-black/[0.04] dark:text-white/80 dark:hover:bg-white/[0.05]"
+                    className="flex w-full items-center justify-between rounded-[18px] px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-black/[0.04] dark:text-white/80 dark:hover:bg-white/[0.05]"
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-2.5">
                       <span className="grid h-8 w-8 place-items-center rounded-full bg-black/[0.04] dark:bg-white/[0.05]">
                         <AdminIcon />
                       </span>
@@ -126,9 +166,11 @@ export function AppHeader({
                   </button>
                 ) : null}
 
+                <div className="my-1 h-px bg-black/[0.06] dark:bg-white/[0.06]" />
+
                 <button
                   onClick={onLogout}
-                  className="flex w-full items-center justify-between rounded-[18px] px-3 py-3 text-left text-sm font-medium text-slate-700 transition hover:bg-black/[0.04] dark:text-white/80 dark:hover:bg-white/[0.05]"
+                  className="flex w-full items-center justify-between rounded-[18px] px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-black/[0.04] dark:text-white/80 dark:hover:bg-white/[0.05]"
                 >
                   <span>{copy.logout}</span>
                   <span className="text-slate-400 dark:text-white/35">↗</span>

@@ -34,7 +34,7 @@ export function AdminActivityPage({
   const canGoNext = Boolean(loginEvents && loginEvents.page * loginEvents.page_size < loginEvents.total);
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <AdminMetricCard label={copy.adminRecentLoginAttempts} value={formatAdminNumber(items.length)} tone="sky" />
         <AdminMetricCard label={copy.adminFilterCompleted} value={formatAdminNumber(successCount)} tone="emerald" />
@@ -47,7 +47,7 @@ export function AdminActivityPage({
           {items.length === 0 ? (
             <AdminEmptyState message={copy.adminNoData} />
           ) : (
-            <table className="min-w-full text-left text-xs">
+            <table className="w-full min-w-full text-left text-xs">
               <thead className="text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-white/35">
                 <tr>
                   <th className="px-2 py-2">{copy.adminUserLabel}</th>

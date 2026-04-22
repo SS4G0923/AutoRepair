@@ -341,7 +341,7 @@ export function AdminModelsPage({
   }, [modelConfigs]);
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <AdminSurface>
         <AdminSectionTitle
           title={copy.adminModelsTitle}
@@ -409,7 +409,7 @@ export function AdminModelsPage({
             {items.length === 0 ? (
               <AdminEmptyState message={copy.adminNoData} />
             ) : (
-              <table className="min-w-full text-left text-xs">
+              <table className="w-full min-w-full text-left text-xs">
                 <thead className="text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-white/35">
                   <tr>
                     <th className="px-2 py-2">{copy.model}</th>

@@ -60,7 +60,7 @@ export function AdminRequestsPage({
   const canGoNext = Boolean(requests && requests.page * requests.page_size < requests.total);
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <AdminSurface>
         <div className="grid gap-2 xl:grid-cols-[1.3fr_1fr_0.7fr_0.7fr]">
           <input

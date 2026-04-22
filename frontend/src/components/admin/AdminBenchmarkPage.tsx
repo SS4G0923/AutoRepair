@@ -69,7 +69,7 @@ export function AdminBenchmarkPage({ apiBaseUrl, copy }: AdminBenchmarkPageProps
   }
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <AdminSurface>
         <AdminSectionTitle
           title={copy.adminBenchmarkTitle}

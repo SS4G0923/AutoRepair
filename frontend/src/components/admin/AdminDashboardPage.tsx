@@ -32,7 +32,7 @@ function DashboardBarList({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       {items.map((item) => (
         <div key={item.label}>
           <div className="mb-0.5 flex items-center justify-between gap-3 text-[11px] text-slate-500 dark:text-white/45">
@@ -59,7 +59,7 @@ export function AdminDashboardPage({ copy, data }: AdminDashboardPageProps) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
         <AdminMetricCard
           label={copy.adminDashboardTotalUsers}
