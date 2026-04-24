@@ -28,6 +28,7 @@ def call_llm_for_json(
     tool_event_handler=None,
     metadata_handler=None,
     audit_context: LLMCallContext | None = None,
+    force_disable_thinking: bool = False,
 ):
     runtime_model = None
     try:
@@ -39,6 +40,8 @@ def call_llm_for_json(
     provider_name = runtime_model.provider_name if runtime_model is not None else provider_code
     provider_model_name = runtime_model.api_model_name if runtime_model is not None else model
     thinking_enabled = is_model_thinking_enabled(runtime_model) if runtime_model is not None else False
+    if force_disable_thinking:
+        thinking_enabled = False
     is_ollama_like = bool(
         runtime_model is not None
         and (
